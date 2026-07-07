@@ -67,6 +67,11 @@ jobs:
       contents: write     # create/upload GitHub Release assets
       packages: write      # push to the org GitHub Packages feed
       id-token: write      # ADR-0013: mint the GitHub OIDC token for nuget.org Trusted Publishing
+    env:
+      # nuget.org publish is skipped until the org registers a Trusted Publishing policy for this
+      # repo AND a NUGET_USER secret is set (secrets can't be read in `if:` directly, so surface it
+      # as env). The org-feed push always runs. Set the secret to enable the public dual-publish.
+      NUGET_USER: ${{ secrets.NUGET_USER }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v5
@@ -135,13 +140,13 @@ jobs:
           echo "Published FS.GG.Audio.* ${{ steps.ver.outputs.version }} to the org feed."
 
       - name: NuGet login (OIDC → short-lived nuget.org key)
-        if: steps.ver.outputs.push == 'true'
+        if: steps.ver.outputs.push == 'true' && env.NUGET_USER != ''
         id: nuget-login
         uses: NuGet/login@v1
         with:
           user: ${{ secrets.NUGET_USER }}
       - name: Push coherent set to nuget.org (public)
-        if: steps.ver.outputs.push == 'true'
+        if: steps.ver.outputs.push == 'true' && env.NUGET_USER != ''
         shell: bash
         run: |
           set -euo pipefail
