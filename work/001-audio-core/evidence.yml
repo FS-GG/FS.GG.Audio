@@ -1,0 +1,522 @@
+schemaVersion: 1
+workId: 001-audio-core
+stage: evidence
+status: evidenceReady
+sourceSpec: work/001-audio-core/spec.md
+sourceClarifications: work/001-audio-core/clarifications.md
+sourceChecklist: work/001-audio-core/checklist.md
+sourcePlan: work/001-audio-core/plan.md
+sourceTasks: work/001-audio-core/tasks.yml
+sourceAnalysis: readiness/001-audio-core/analysis.json
+sourceSnapshots:
+  - label: analysis
+    path: readiness/001-audio-core/analysis.json
+    digest: afbe2f05e0dc161fffcc8948e8e8aa18e216c40dfe93dff008e83bea9db0b174
+    schemaVersion: 1
+  - label: checklist
+    path: work/001-audio-core/checklist.md
+    digest: f2ac59bd8d7d4a56e7b326019775b6a281832403f0bc306cb443c5234f37147d
+    schemaVersion: 1
+  - label: clarifications
+    path: work/001-audio-core/clarifications.md
+    digest: fb50acb584264c8cc826dda1232772ceec07831db445eb9e7f2febadfe86794b
+    schemaVersion: 1
+  - label: plan
+    path: work/001-audio-core/plan.md
+    digest: 7a693898d07de1fff68f0016818833b23999986c1a465a762b1da3788a25877c
+    schemaVersion: 1
+  - label: spec
+    path: work/001-audio-core/spec.md
+    digest: b7a69aafffa610ef2c2feb1f17cc7a98e3875a273dcfa7c42332011b48f2cc8a
+    schemaVersion: 1
+  - label: tasks
+    path: work/001-audio-core/tasks.yml
+    digest: d0f32d7c8b1fe0d0085aff0a31ffac6957735814a64a19444542dfb65f9e7627
+    schemaVersion: 1
+evidence:
+  - id: EV001
+    kind: verification
+    subject:
+      type: "task"
+      id: "T001"
+    taskRefs: ["T001"]
+    requirementRefs: ["FR-001"]
+    acceptanceScenarioRefs: []
+    clarificationDecisionRefs: []
+    checklistResultRefs: []
+    planDecisionRefs: []
+    obligationRefs: ["EV001"]
+    artifacts: ["src/FS.GG.Audio.Core/FS.GG.Audio.Core.fsproj", "tests/FS.GG.Audio.Core.Tests/AudioTests.fs"]
+    sourceRefs: []
+    result: pass
+    synthetic: false
+    syntheticDisclosure: null
+    rationale: null
+    owner: null
+    scope: null
+    laterLifecycleVisibility: null
+    notes: ["dotnet test green headless (10/10 passed, 0 failed), no Skia and no audio device; net10.0."]
+  - id: EV002
+    kind: verification
+    subject:
+      type: "task"
+      id: "T002"
+    taskRefs: ["T002"]
+    requirementRefs: ["FR-002"]
+    acceptanceScenarioRefs: []
+    clarificationDecisionRefs: []
+    checklistResultRefs: []
+    planDecisionRefs: []
+    obligationRefs: ["EV002"]
+    artifacts: ["src/FS.GG.Audio.Core/Audio.fs", "tests/FS.GG.Audio.Core.Tests/AudioTests.fs"]
+    sourceRefs: []
+    result: pass
+    synthetic: false
+    syntheticDisclosure: null
+    rationale: null
+    owner: null
+    scope: null
+    laterLifecycleVisibility: null
+    notes: ["Tests 'smart constructors clamp carried volume into [0,1]' and 'clampVolume is total, including nan' pass; FsCheck >=1000 cases confirm clampVolume stays in range, never throws."]
+  - id: EV003
+    kind: verification
+    subject:
+      type: "task"
+      id: "T003"
+    taskRefs: ["T003"]
+    requirementRefs: ["FR-003"]
+    acceptanceScenarioRefs: []
+    clarificationDecisionRefs: []
+    checklistResultRefs: []
+    planDecisionRefs: []
+    obligationRefs: ["EV003"]
+    artifacts: ["src/FS.GG.Audio.Core/Audio.fs", "tests/FS.GG.Audio.Core.Tests/AudioTests.fs"]
+    sourceRefs: []
+    result: pass
+    synthetic: false
+    syntheticDisclosure: null
+    rationale: null
+    owner: null
+    scope: null
+    laterLifecycleVisibility: null
+    notes: ["Test 'interpret records requests in dispatch order' + FsCheck count/normalization property (>=500 cases) pass — oldest-first ordering and volume normalization preserved."]
+  - id: EV004
+    kind: verification
+    subject:
+      type: "task"
+      id: "T004"
+    taskRefs: ["T004"]
+    requirementRefs: ["FR-004"]
+    acceptanceScenarioRefs: []
+    clarificationDecisionRefs: []
+    checklistResultRefs: []
+    planDecisionRefs: []
+    obligationRefs: ["EV004"]
+    artifacts: ["src/FS.GG.Audio.Core/Audio.fs", "tests/FS.GG.Audio.Core.Tests/AudioTests.fs"]
+    sourceRefs: []
+    result: pass
+    synthetic: false
+    syntheticDisclosure: null
+    rationale: null
+    owner: null
+    scope: null
+    laterLifecycleVisibility: null
+    notes: ["Test 'record appends to evidence oldest-first' passes; record is a pure append over the immutable AudioEvidence record."]
+  - id: EV005
+    kind: verification
+    subject:
+      type: "task"
+      id: "T005"
+    taskRefs: ["T005"]
+    requirementRefs: ["FR-005"]
+    acceptanceScenarioRefs: []
+    clarificationDecisionRefs: []
+    checklistResultRefs: []
+    planDecisionRefs: []
+    obligationRefs: ["EV005"]
+    artifacts: ["tests/FS.GG.Audio.Core.Tests/AudioTests.fs"]
+    sourceRefs: []
+    result: pass
+    synthetic: false
+    syntheticDisclosure: null
+    rationale: null
+    owner: null
+    scope: null
+    laterLifecycleVisibility: null
+    notes: ["Byte-parity: AudioTests.fs is the FS.GG.Rendering Canvas.Tests/AudioTests suite ported verbatim (only module name + `open FS.GG.Audio.Core` differ); all assertions pass unchanged."]
+  - id: EV006
+    kind: verification
+    subject:
+      type: "task"
+      id: "T006"
+    taskRefs: ["T006"]
+    requirementRefs: ["FR-006"]
+    acceptanceScenarioRefs: []
+    clarificationDecisionRefs: []
+    checklistResultRefs: []
+    planDecisionRefs: []
+    obligationRefs: ["EV006"]
+    artifacts: ["Directory.Packages.props", "src/FS.GG.Audio.Core/FS.GG.Audio.Core.fsproj"]
+    sourceRefs: []
+    result: pass
+    synthetic: false
+    syntheticDisclosure: null
+    rationale: null
+    owner: null
+    scope: null
+    laterLifecycleVisibility: null
+    notes: ["`dotnet list src/FS.GG.Audio.Core package` shows exactly one top-level dependency: FSharp.Core 10.1.301. No FS.GG.UI.*, no SkiaSharp."]
+  - id: EV007
+    kind: review
+    subject:
+      type: "task"
+      id: "T007"
+    taskRefs: ["T007"]
+    requirementRefs: ["FR-007"]
+    acceptanceScenarioRefs: []
+    clarificationDecisionRefs: []
+    checklistResultRefs: []
+    planDecisionRefs: []
+    obligationRefs: ["EV007"]
+    artifacts: ["docs/api-surface/FS.GG.Audio.Core/Audio.fsi", "src/FS.GG.Audio.Core/Audio.fsi"]
+    sourceRefs: []
+    result: pass
+    synthetic: false
+    syntheticDisclosure: null
+    rationale: null
+    owner: null
+    scope: null
+    laterLifecycleVisibility: null
+    notes: ["Public surface declared by Audio.fsi under `namespace FS.GG.Audio.Core`; committed surface baseline at docs/api-surface/FS.GG.Audio.Core/Audio.fsi matches the shipped signature."]
+  - id: EV008
+    kind: verification
+    subject:
+      type: "task"
+      id: "T008"
+    taskRefs: ["T008"]
+    requirementRefs: ["FR-001"]
+    acceptanceScenarioRefs: []
+    clarificationDecisionRefs: []
+    checklistResultRefs: []
+    planDecisionRefs: ["PD-001"]
+    obligationRefs: ["EV008"]
+    artifacts: ["tests/FS.GG.Audio.Core.Tests/AudioTests.fs"]
+    sourceRefs: []
+    result: pass
+    synthetic: false
+    syntheticDisclosure: null
+    rationale: null
+    owner: null
+    scope: null
+    laterLifecycleVisibility: null
+    notes: ["PD-001 realized: headless build + Expecto test project run green on net10.0."]
+  - id: EV009
+    kind: verification
+    subject:
+      type: "task"
+      id: "T009"
+    taskRefs: ["T009"]
+    requirementRefs: ["FR-002"]
+    acceptanceScenarioRefs: []
+    clarificationDecisionRefs: []
+    checklistResultRefs: []
+    planDecisionRefs: ["PD-002"]
+    obligationRefs: ["EV009"]
+    artifacts: ["src/FS.GG.Audio.Core/Audio.fs", "tests/FS.GG.Audio.Core.Tests/AudioTests.fs"]
+    sourceRefs: []
+    result: pass
+    synthetic: false
+    syntheticDisclosure: null
+    rationale: null
+    owner: null
+    scope: null
+    laterLifecycleVisibility: null
+    notes: ["PD-002 realized: clamp semantics moved unchanged; boundary/nan tests pass."]
+  - id: EV010
+    kind: verification
+    subject:
+      type: "task"
+      id: "T010"
+    taskRefs: ["T010"]
+    requirementRefs: ["FR-003"]
+    acceptanceScenarioRefs: []
+    clarificationDecisionRefs: []
+    checklistResultRefs: []
+    planDecisionRefs: ["PD-003"]
+    obligationRefs: ["EV010"]
+    artifacts: ["src/FS.GG.Audio.Core/Audio.fs", "tests/FS.GG.Audio.Core.Tests/AudioTests.fs"]
+    sourceRefs: []
+    result: pass
+    synthetic: false
+    syntheticDisclosure: null
+    rationale: null
+    owner: null
+    scope: null
+    laterLifecycleVisibility: null
+    notes: ["PD-003 realized: interpret ordering pinned by an order-sensitive fixture + property test."]
+  - id: EV011
+    kind: verification
+    subject:
+      type: "task"
+      id: "T011"
+    taskRefs: ["T011"]
+    requirementRefs: ["FR-004"]
+    acceptanceScenarioRefs: []
+    clarificationDecisionRefs: []
+    checklistResultRefs: []
+    planDecisionRefs: ["PD-004"]
+    obligationRefs: ["EV011"]
+    artifacts: ["src/FS.GG.Audio.Core/Audio.fs", "tests/FS.GG.Audio.Core.Tests/AudioTests.fs"]
+    sourceRefs: []
+    result: pass
+    synthetic: false
+    syntheticDisclosure: null
+    rationale: null
+    owner: null
+    scope: null
+    laterLifecycleVisibility: null
+    notes: ["PD-004 realized: record preserved as a pure append; immutability test passes."]
+  - id: EV012
+    kind: verification
+    subject:
+      type: "task"
+      id: "T012"
+    taskRefs: ["T012"]
+    requirementRefs: ["FR-005"]
+    acceptanceScenarioRefs: []
+    clarificationDecisionRefs: []
+    checklistResultRefs: []
+    planDecisionRefs: ["PD-005"]
+    obligationRefs: ["EV012"]
+    artifacts: ["tests/FS.GG.Audio.Core.Tests/AudioTests.fs"]
+    sourceRefs: []
+    result: pass
+    synthetic: false
+    syntheticDisclosure: null
+    rationale: null
+    owner: null
+    scope: null
+    laterLifecycleVisibility: null
+    notes: ["PD-005 realized: donor suite ported verbatim as the parity gate; assertions unchanged."]
+  - id: EV013
+    kind: verification
+    subject:
+      type: "task"
+      id: "T013"
+    taskRefs: ["T013"]
+    requirementRefs: ["FR-006"]
+    acceptanceScenarioRefs: []
+    clarificationDecisionRefs: []
+    checklistResultRefs: []
+    planDecisionRefs: ["PD-006"]
+    obligationRefs: ["EV013"]
+    artifacts: ["Directory.Packages.props", "src/FS.GG.Audio.Core/FS.GG.Audio.Core.fsproj"]
+    sourceRefs: []
+    result: pass
+    synthetic: false
+    syntheticDisclosure: null
+    rationale: null
+    owner: null
+    scope: null
+    laterLifecycleVisibility: null
+    notes: ["PD-006 realized: FSharp.Core-only under CPM; no FS.GG.UI.*/SkiaSharp leak (verified by dotnet list package)."]
+  - id: EV014
+    kind: review
+    subject:
+      type: "task"
+      id: "T014"
+    taskRefs: ["T014"]
+    requirementRefs: ["FR-007"]
+    acceptanceScenarioRefs: []
+    clarificationDecisionRefs: []
+    checklistResultRefs: []
+    planDecisionRefs: ["PD-007"]
+    obligationRefs: ["EV014"]
+    artifacts: ["docs/api-surface/FS.GG.Audio.Core/Audio.fsi", "src/FS.GG.Audio.Core/Audio.fsi"]
+    sourceRefs: []
+    result: pass
+    synthetic: false
+    syntheticDisclosure: null
+    rationale: null
+    owner: null
+    scope: null
+    laterLifecycleVisibility: null
+    notes: ["PD-007 realized: surface declared via .fsi under FS.GG.Audio.Core + committed api-surface baseline."]
+  - id: EV015
+    kind: deferral
+    subject:
+      type: "task"
+      id: "T015"
+    taskRefs: ["T015"]
+    requirementRefs: []
+    acceptanceScenarioRefs: []
+    clarificationDecisionRefs: ["DEC-004"]
+    checklistResultRefs: []
+    planDecisionRefs: ["PD-008"]
+    obligationRefs: ["EV015"]
+    artifacts: []
+    sourceRefs: []
+    result: deferred
+    synthetic: false
+    syntheticDisclosure: null
+    rationale: "The three additive AudioEffect variants (PlaySfx3D, SetBusVolume, Duck) require a real playback backend and 3D/bus semantics; the verbatim-move scope (SB-004) excludes them from this work item."
+    owner: "ehotwagner"
+    scope: "PlaySfx3D / SetBusVolume / Duck effect variants and their playback semantics."
+    laterLifecycleVisibility: "Re-opens as the FS.GG.Audio.Host work item (its own charter -> ship) that implements the backends and adds these variants."
+    notes: []
+  - id: EV016
+    kind: deferral
+    subject:
+      type: "task"
+      id: "T016"
+    taskRefs: ["T016"]
+    requirementRefs: []
+    acceptanceScenarioRefs: []
+    clarificationDecisionRefs: []
+    checklistResultRefs: ["CR-008"]
+    planDecisionRefs: ["PD-009"]
+    obligationRefs: ["EV016"]
+    artifacts: []
+    sourceRefs: []
+    result: deferred
+    synthetic: false
+    syntheticDisclosure: null
+    rationale: "PD-009 carries forward the checklist's accepted deferral CR-008 (the additive variants); it stays deferred for the same reason as EV015."
+    owner: "ehotwagner"
+    scope: "The accepted-deferral disposition CR-008 covering the additive audio effect variants."
+    laterLifecycleVisibility: "Resurfaces with the FS.GG.Audio.Host work item alongside EV015."
+    notes: []
+  - id: EV017
+    kind: review
+    subject:
+      type: "task"
+      id: "T017"
+    taskRefs: ["T017"]
+    requirementRefs: []
+    acceptanceScenarioRefs: []
+    clarificationDecisionRefs: []
+    checklistResultRefs: []
+    planDecisionRefs: ["PD-001"]
+    obligationRefs: ["EV017"]
+    artifacts: ["src/FS.GG.Audio.Core/Audio.fsi", "work/001-audio-core/contracts/audio-core-surface.md"]
+    sourceRefs: []
+    result: pass
+    synthetic: false
+    syntheticDisclosure: null
+    rationale: null
+    owner: null
+    scope: null
+    laterLifecycleVisibility: null
+    notes: ["PC-001 contract surface authored (contracts/audio-core-surface.md) and the shipped Audio.fsi matches it member-for-member."]
+  - id: EV018
+    kind: verification
+    subject:
+      type: "task"
+      id: "T018"
+    taskRefs: ["T018"]
+    requirementRefs: []
+    acceptanceScenarioRefs: []
+    clarificationDecisionRefs: []
+    checklistResultRefs: []
+    planDecisionRefs: ["PD-001"]
+    obligationRefs: ["EV018"]
+    artifacts: ["tests/FS.GG.Audio.Core.Tests/AudioTests.fs"]
+    sourceRefs: []
+    result: pass
+    synthetic: false
+    syntheticDisclosure: null
+    rationale: null
+    owner: null
+    scope: null
+    laterLifecycleVisibility: null
+    notes: ["VO-001 verification obligation met: focused Expecto suite executed green (10/10) as the semantic test."]
+  - id: EV019
+    kind: note
+    subject:
+      type: "task"
+      id: "T019"
+    taskRefs: ["T019"]
+    requirementRefs: []
+    acceptanceScenarioRefs: []
+    clarificationDecisionRefs: []
+    checklistResultRefs: []
+    planDecisionRefs: []
+    obligationRefs: ["EV019"]
+    artifacts: ["work/001-audio-core/plan.md"]
+    sourceRefs: []
+    result: pass
+    synthetic: false
+    syntheticDisclosure: null
+    rationale: null
+    owner: null
+    scope: null
+    laterLifecycleVisibility: null
+    notes: ["PM-001 migration posture: no schema migration applies — FS.GG.Audio.Core is a new BCL-only package with no prior published surface to migrate; plan schemaVersion 1 accepted."]
+  - id: EV020
+    kind: generated-view
+    subject:
+      type: "task"
+      id: "T020"
+    taskRefs: ["T020"]
+    requirementRefs: []
+    acceptanceScenarioRefs: []
+    clarificationDecisionRefs: []
+    checklistResultRefs: []
+    planDecisionRefs: ["PD-001"]
+    obligationRefs: ["EV020"]
+    artifacts: ["readiness/001-audio-core/analysis.json"]
+    sourceRefs: []
+    result: pass
+    synthetic: false
+    syntheticDisclosure: null
+    rationale: null
+    owner: null
+    scope: null
+    laterLifecycleVisibility: null
+    notes: ["GV-001: generated views refresh current from sources — analyze succeeded (implementationReady) with no staleGeneratedView finding."]
+  - id: EV021
+    kind: deferral
+    subject:
+      type: "task"
+      id: "T021"
+    taskRefs: ["T021"]
+    requirementRefs: []
+    acceptanceScenarioRefs: []
+    clarificationDecisionRefs: ["DEC-004"]
+    checklistResultRefs: []
+    planDecisionRefs: []
+    obligationRefs: ["EV021"]
+    artifacts: []
+    sourceRefs: []
+    result: deferred
+    synthetic: false
+    syntheticDisclosure: null
+    rationale: "T021 keeps the DEC-004 deferral visible; the deferred work (additive variants) is unchanged and belongs to the host, not this extraction."
+    owner: "ehotwagner"
+    scope: "Visibility of the DEC-004 accepted deferral through to ship."
+    laterLifecycleVisibility: "Carried into the FS.GG.Audio.Host work item's charter as an input."
+    notes: []
+  - id: EV022
+    kind: deferral
+    subject:
+      type: "task"
+      id: "T022"
+    taskRefs: ["T022"]
+    requirementRefs: []
+    acceptanceScenarioRefs: []
+    clarificationDecisionRefs: []
+    checklistResultRefs: ["CR-008"]
+    planDecisionRefs: []
+    obligationRefs: ["EV022"]
+    artifacts: []
+    sourceRefs: []
+    result: deferred
+    synthetic: false
+    syntheticDisclosure: null
+    rationale: "T022 keeps the CR-008 accepted deferral visible; same deferred scope as EV016/EV021."
+    owner: "ehotwagner"
+    scope: "Visibility of the CR-008 accepted-deferral disposition through to ship."
+    laterLifecycleVisibility: "Carried into the FS.GG.Audio.Host work item alongside EV021."
+    notes: []
+lifecycleNotes:
+  - "Next lifecycle action: verify."

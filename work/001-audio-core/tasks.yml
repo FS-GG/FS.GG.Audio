@@ -1,0 +1,258 @@
+schemaVersion: 1
+work:
+  id: 001-audio-core
+  title: "Audio Core"
+  stage: tasks
+  status: tasksReady
+  sourceSpec: work/001-audio-core/spec.md
+  sourceClarifications: work/001-audio-core/clarifications.md
+  sourceChecklist: work/001-audio-core/checklist.md
+  sourcePlan: work/001-audio-core/plan.md
+  publicOrToolFacingImpact: true
+
+sources:
+  - label: spec
+    path: work/001-audio-core/spec.md
+    digest: b7a69aafffa610ef2c2feb1f17cc7a98e3875a273dcfa7c42332011b48f2cc8a
+    schemaVersion: 1
+  - label: clarifications
+    path: work/001-audio-core/clarifications.md
+    digest: fb50acb584264c8cc826dda1232772ceec07831db445eb9e7f2febadfe86794b
+    schemaVersion: 1
+  - label: checklist
+    path: work/001-audio-core/checklist.md
+    digest: f2ac59bd8d7d4a56e7b326019775b6a281832403f0bc306cb443c5234f37147d
+    schemaVersion: 1
+  - label: plan
+    path: work/001-audio-core/plan.md
+    digest: 7a693898d07de1fff68f0016818833b23999986c1a465a762b1da3788a25877c
+    schemaVersion: 1
+tasks:
+  - id: T001
+    title: "Implement requirement FR-001"
+    status: pending
+    owner: "sdd"
+    dependencies: []
+    requirements: ["FR-001"]
+    decisions: []
+    sourceIds: ["AC-001", "FR-001"]
+    requiredSkills: ["fsharp", "speckit-implement"]
+    requiredEvidence: ["EV001"]
+  - id: T002
+    title: "Implement requirement FR-002"
+    status: pending
+    owner: "sdd"
+    dependencies: []
+    requirements: ["FR-002"]
+    decisions: []
+    sourceIds: ["AC-002", "FR-002"]
+    requiredSkills: ["fsharp", "speckit-implement"]
+    requiredEvidence: ["EV002"]
+  - id: T003
+    title: "Implement requirement FR-003"
+    status: pending
+    owner: "sdd"
+    dependencies: []
+    requirements: ["FR-003"]
+    decisions: []
+    sourceIds: ["AC-003", "FR-003"]
+    requiredSkills: ["fsharp", "speckit-implement"]
+    requiredEvidence: ["EV003"]
+  - id: T004
+    title: "Implement requirement FR-004"
+    status: pending
+    owner: "sdd"
+    dependencies: []
+    requirements: ["FR-004"]
+    decisions: []
+    sourceIds: ["AC-004", "FR-004"]
+    requiredSkills: ["fsharp", "speckit-implement"]
+    requiredEvidence: ["EV004"]
+  - id: T005
+    title: "Implement requirement FR-005"
+    status: pending
+    owner: "sdd"
+    dependencies: []
+    requirements: ["FR-005"]
+    decisions: ["DEC-002"]
+    sourceIds: ["AC-005", "FR-005"]
+    requiredSkills: ["fsharp", "speckit-implement"]
+    requiredEvidence: ["EV005"]
+  - id: T006
+    title: "Implement requirement FR-006"
+    status: pending
+    owner: "sdd"
+    dependencies: []
+    requirements: ["FR-006"]
+    decisions: ["DEC-003"]
+    sourceIds: ["AC-006", "FR-006"]
+    requiredSkills: ["fsharp", "speckit-implement"]
+    requiredEvidence: ["EV006"]
+  - id: T007
+    title: "Implement requirement FR-007"
+    status: pending
+    owner: "sdd"
+    dependencies: []
+    requirements: ["FR-007"]
+    decisions: ["DEC-001"]
+    sourceIds: ["AC-007", "FR-007"]
+    requiredSkills: ["fsharp", "speckit-implement"]
+    requiredEvidence: ["EV007"]
+  - id: T008
+    title: "Implement plan decision PD-001"
+    status: pending
+    owner: "sdd"
+    dependencies: ["T001"]
+    requirements: []
+    decisions: []
+    sourceIds: ["AC-001", "FR-001", "PD-001"]
+    requiredSkills: ["fsharp", "speckit-implement"]
+    requiredEvidence: ["EV008"]
+  - id: T009
+    title: "Implement plan decision PD-002"
+    status: pending
+    owner: "sdd"
+    dependencies: ["T001"]
+    requirements: []
+    decisions: []
+    sourceIds: ["AC-002", "FR-002", "PD-002"]
+    requiredSkills: ["fsharp", "speckit-implement"]
+    requiredEvidence: ["EV009"]
+  - id: T010
+    title: "Implement plan decision PD-003"
+    status: pending
+    owner: "sdd"
+    dependencies: ["T001"]
+    requirements: []
+    decisions: []
+    sourceIds: ["AC-003", "FR-003", "PD-003"]
+    requiredSkills: ["fsharp", "speckit-implement"]
+    requiredEvidence: ["EV010"]
+  - id: T011
+    title: "Implement plan decision PD-004"
+    status: pending
+    owner: "sdd"
+    dependencies: ["T001"]
+    requirements: []
+    decisions: []
+    sourceIds: ["AC-004", "FR-004", "PD-004"]
+    requiredSkills: ["fsharp", "speckit-implement"]
+    requiredEvidence: ["EV011"]
+  - id: T012
+    title: "Implement plan decision PD-005"
+    status: pending
+    owner: "sdd"
+    dependencies: ["T001"]
+    requirements: []
+    decisions: []
+    sourceIds: ["AC-005", "FR-005", "PD-005"]
+    requiredSkills: ["fsharp", "speckit-implement"]
+    requiredEvidence: ["EV012"]
+  - id: T013
+    title: "Implement plan decision PD-006"
+    status: pending
+    owner: "sdd"
+    dependencies: ["T001"]
+    requirements: []
+    decisions: []
+    sourceIds: ["AC-006", "FR-006", "PD-006"]
+    requiredSkills: ["fsharp", "speckit-implement"]
+    requiredEvidence: ["EV013"]
+  - id: T014
+    title: "Implement plan decision PD-007"
+    status: pending
+    owner: "sdd"
+    dependencies: ["T001"]
+    requirements: []
+    decisions: []
+    sourceIds: ["AC-007", "FR-007", "PD-007"]
+    requiredSkills: ["fsharp", "speckit-implement"]
+    requiredEvidence: ["EV014"]
+  - id: T015
+    title: "Implement plan decision PD-008"
+    status: pending
+    owner: "sdd"
+    dependencies: ["T001"]
+    requirements: []
+    decisions: []
+    sourceIds: ["DEC-004", "PD-008"]
+    requiredSkills: ["fsharp", "speckit-implement"]
+    requiredEvidence: ["EV015"]
+  - id: T016
+    title: "Implement plan decision PD-009"
+    status: pending
+    owner: "sdd"
+    dependencies: ["T001"]
+    requirements: []
+    decisions: []
+    sourceIds: ["CR-008", "PD-009"]
+    requiredSkills: ["fsharp", "speckit-implement"]
+    requiredEvidence: ["EV016"]
+  - id: T017
+    title: "Update contract surface PC-001"
+    status: pending
+    owner: "sdd"
+    dependencies: ["T001"]
+    requirements: []
+    decisions: []
+    sourceIds: ["PC-001", "PD-001"]
+    requiredSkills: ["fsharp"]
+    requiredEvidence: ["EV017"]
+  - id: T018
+    title: "Record verification evidence VO-001"
+    status: pending
+    owner: "sdd"
+    dependencies: ["T001"]
+    requirements: []
+    decisions: []
+    sourceIds: ["PC-001", "PD-001", "VO-001"]
+    requiredSkills: ["automated-tests", "readiness-evidence"]
+    requiredEvidence: ["EV018"]
+  - id: T019
+    title: "Handle migration posture PM-001"
+    status: pending
+    owner: "sdd"
+    dependencies: ["T001"]
+    requirements: []
+    decisions: []
+    sourceIds: ["PC-001", "PM-001"]
+    requiredSkills: ["schema-versioning"]
+    requiredEvidence: ["EV019"]
+  - id: T020
+    title: "Refresh generated view impact GV-001"
+    status: pending
+    owner: "sdd"
+    dependencies: ["T001"]
+    requirements: []
+    decisions: []
+    sourceIds: ["GV-001", "PD-001"]
+    requiredSkills: ["deterministic-json"]
+    requiredEvidence: ["EV020"]
+  - id: T021
+    title: "Keep accepted deferral DEC-004 visible"
+    status: pending
+    owner: "sdd"
+    dependencies: ["T001"]
+    requirements: []
+    decisions: []
+    sourceIds: ["DEC-004"]
+    requiredSkills: ["traceability"]
+    requiredEvidence: ["EV021"]
+  - id: T022
+    title: "Keep accepted deferral CR-008 visible"
+    status: pending
+    owner: "sdd"
+    dependencies: ["T001"]
+    requirements: []
+    decisions: []
+    sourceIds: ["CR-008"]
+    requiredSkills: ["traceability"]
+    requiredEvidence: ["EV022"]
+acceptedDeferrals:
+  - "CR-008"
+  - "DEC-004"
+findings: []
+advisoryNotes:
+  - "Optional Governance pointers remain compatibility facts only."
+lifecycleNotes:
+  - "Next lifecycle action: fsgg-sdd analyze --work 001-audio-core."

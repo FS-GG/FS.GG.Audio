@@ -1,0 +1,20 @@
+<Project>
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <!-- DEC-003 (work item 001-audio-core): the FS.GG.Audio.* packages release on their OWN
+         version axis, independent of $(FsGgUiVersion) and $(FsGgGameVersion) — mirroring how
+         FS.GG.Game.Core is pinned by $(FsGgGameVersion). Bottom-layer, BCL-only. -->
+    <FsGgAudioVersion>0.1.0-preview.1</FsGgAudioVersion>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- FSharp.Core: the org common pin (Rendering/SDD/Governance all pin 10.1.301). FS.GG.Audio.Core
+         depends on FSharp.Core ALONE (FR-006). -->
+    <PackageVersion Include="FSharp.Core" Version="10.1.301" />
+    <!-- Test-only. FsCheck 3.x to match the ported suite's API (Config.QuickThrowOnFailure.WithMaxTest
+         / Check.One) — the same line the donor Canvas.Tests used. -->
+    <PackageVersion Include="Expecto" Version="10.2.3" />
+    <PackageVersion Include="FsCheck" Version="3.3.3" />
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.7.0" />
+    <PackageVersion Include="YoloDev.Expecto.TestSdk" Version="0.15.6" />
+  </ItemGroup>
+</Project>

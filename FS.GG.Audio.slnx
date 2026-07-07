@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="src/FS.GG.Audio.Core/FS.GG.Audio.Core.fsproj" />
+  <Project Path="tests/FS.GG.Audio.Core.Tests/FS.GG.Audio.Core.Tests.fsproj" />
+</Solution>

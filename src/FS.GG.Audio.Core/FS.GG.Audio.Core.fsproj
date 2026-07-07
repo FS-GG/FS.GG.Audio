@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <IsPackable>true</IsPackable>
+    <PackageId>FS.GG.Audio.Core</PackageId>
+    <Version>$(FsGgAudioVersion)</Version>
+    <Authors>FS-GG</Authors>
+    <Description>Pure, BCL-only audio request vocabulary (SoundId/TrackId/AudioEffect/AudioEvidence plus a record-only interpreter) — the bottom layer of the FS.GG.Audio component. Extracted verbatim from FS.GG.UI.Canvas.Audio.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Audio.fsi" />
+    <Compile Include="Audio.fs" />
+  </ItemGroup>
+
+  <!-- FR-006: FSharp.Core is the ONLY dependency, pinned via CPM to the org common 10.1.301. -->
+  <ItemGroup>
+    <PackageReference Include="FSharp.Core" />
+  </ItemGroup>
+
+</Project>
