@@ -36,15 +36,15 @@
       "fs.gg.audio.engine": {
         "type": "Project",
         "dependencies": {
-          "FS.GG.Audio.Core": "[0.1.0-preview.1, )",
-          "FS.GG.Audio.Host": "[0.1.0-preview.1, )",
+          "FS.GG.Audio.Core": "[0.1.0, )",
+          "FS.GG.Audio.Host": "[0.1.0, )",
           "FSharp.Core": "[10.1.301, )"
         }
       },
       "fs.gg.audio.host": {
         "type": "Project",
         "dependencies": {
-          "FS.GG.Audio.Core": "[0.1.0-preview.1, )",
+          "FS.GG.Audio.Core": "[0.1.0, )",
           "FSharp.Core": "[10.1.301, )",
           "Silk.NET.OpenAL": "[2.23.0, )",
           "Silk.NET.OpenAL.Soft.Native": "[1.23.1, )"
