@@ -54,18 +54,23 @@
 #                                             # Backlog), SKIPPING items whose `Blocked by` refs are
 #                                             # still open (or unverifiable), with the reason on
 #                                             # stderr. --ignore-blocked restores the old behaviour.
+#   fsgg-coord child <parent> <issue>         # link <issue> as a native SUB-ISSUE of <parent> — the
+#                                             # ONLY edge `done --flip` rolls up over. A title
+#                                             # convention or a comment is not a link.
 #   fsgg-coord done  <issue> [--pr N] [--flip]
 #                                             # verify an item is finished (PR merged AND board
 #                                             # Status=Done) and print an EARNED green DONE stamp;
 #                                             # red stamp + non-zero exit if a check fails (--flip
 #                                             # also sets Status=Done once the PR is merged, and rolls
 #                                             # the completion up to any parent epic whose children
-#                                             # are now all Done).
+#                                             # are now all Done — refusing to roll up an epic whose
+#                                             # BODY declares a child the sub-issue graph lacks).
 #   fsgg-coord lint  [--repo R] [--json] [--strict]
 #                                             # assert the board's EPIC invariants: no OPEN `[epic]`
 #                                             # with zero sub-issues (the orphaned epic), none the
 #                                             # board calls Done over an open child, none with children
-#                                             # the scan cannot see. Exit 1 on any error. `Status: Done`
+#                                             # the scan cannot see, none whose body declares a child
+#                                             # that is not linked. Exit 1 on any error. `Status: Done`
 #                                             # on a still-open issue is a NOTE (fatal under --strict).
 #   fsgg-coord budget                         # print GraphQL + REST rate-limit meters (free)
 #
@@ -83,8 +88,10 @@
 #                                             # worktree/branch to isolate on. --force steals.
 #   fsgg-coord heartbeat <issue>              # renew this worker's lease on a claim
 #   fsgg-coord release <issue> [--status S] [--force]
-#                                             # drop the lock: delete the marker, unassign, Status
-#                                             # (default Ready, so the item returns to the pool)
+#                                             # drop the lock: delete the marker, unassign, and reset
+#                                             # the `In progress` claim set -> Ready. Any OTHER status
+#                                             # the caller chose (Blocked, Backlog, ...) is PRESERVED;
+#                                             # --status S overrides. See release_cmd.
 #   fsgg-coord who [--repo R] [--local] [--json]
 #                                             # WHO holds WHAT, right now: worker, age, lease
 #                                             # health, declared paths, branch. Finds work by its
@@ -144,6 +151,9 @@ set -euo pipefail
 
 OWNER="${FSGG_COORD_OWNER:-FS-GG}"
 TITLE="${FSGG_COORD_PROJECT:-Coordination}"
+# The ONLY Status a claim writes. Undoing a claim (`release`, `reap`) resets this column and no
+# other — see unclaim_status.
+CLAIM_STATUS="In progress"
 CACHE="${FSGG_COORD_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/fsgg-coord}"
 BOARD_TTL_MIN="${FSGG_COORD_BOARD_TTL_MIN:-1440}"
 CLAIM_LEASE_MIN="${FSGG_CLAIM_LEASE_MIN:-120}"
@@ -623,6 +633,69 @@ item_id() {
   printf '%s\n' "$iid"
 }
 
+# ---- the item's CURRENT Status, read fresh (never cached — `release` decides on it) -------------
+# Deliberately NOT folded into `item_id`: that caches its answer to a file, and a stale Status is
+# worse than none. One narrow query, no blocker resolution.
+#
+# Echoes the Status name — empty when the item is on the board with no Status set.
+#   rc 0 -> read it    rc 1 -> the read failed    rc 2 -> the issue is not on this board
+#
+# Callers must invoke this in a command substitution: `gql`/`ensure_board` `die` on failure, and the
+# substitution's subshell is what turns that into rc 1 rather than killing the caller mid-release.
+item_status() {
+  local ref="$1"
+  parse_ref "$ref"
+  ensure_board >/dev/null
+  local boardnum out node
+  boardnum="$(board_get '.number')"
+  local q='query($owner:String!, $repo:String!, $num:Int!){
+    repository(owner:$owner, name:$repo){ issue(number:$num){
+      projectItems(first:20){ nodes{
+        project{ number }
+        status: fieldValueByName(name:"Status"){ ... on ProjectV2ItemFieldSingleSelectValue{ name } }
+      } } } }
+    rateLimit{ cost remaining }
+  }'
+  # Check the read EXPLICITLY. `gql` dies, but its `exit` only unwinds the `$( )` it runs in, leaving
+  # `out` empty here — and an empty payload yields no board node, which is indistinguishable from
+  # "not on this board" (rc 2) unless we catch it first. That mistake is the whole bug in miniature:
+  # a failed read must never be reported as a known, benign state.
+  out="$(gql "$q" -f owner="$R_OWNER" -f repo="$R_REPO" -F num="$R_NUM")" || return 1
+  [ -n "$out" ] || return 1
+  node="$(jq -c --argjson pn "$boardnum" \
+    '[ .data.repository.issue.projectItems.nodes[]? | select(.project.number == $pn) ] | first // empty' \
+    <<<"$out")" || return 1
+  [ -n "$node" ] || return 2
+  jq -r '.status.name // ""' <<<"$node"
+}
+
+# ---- what Status should an item carry once its claim is UNDONE? (#331) --------------------------
+# `release` and `reap` are the two ways a claim goes away, so they owe the board the same answer —
+# and both used to force `Ready`. But "the lease is gone" and "this item is startable" are DIFFERENT
+# claims. A claim's only Status footprint is the `$CLAIM_STATUS` it wrote; that is the one column
+# undoing it may reset. `Blocked`, `Backlog`, `In review`, `Done` were each chosen by somebody, and
+# overwriting them is how the board came to assert `Ready` on rows whose `Blocked by` named an open
+# issue — silently, every time a worker followed the documented blocked-item sequence.
+#
+# And a Status we could not READ is not a Status we may overwrite: guessing `Ready` over an unknown
+# column is the same fail-open one turn in (#266).
+#
+# Echoes one TAB-separated verdict; always rc 0, because every outcome here is a decision:
+#   write<TAB>Ready   reset the claim's own column
+#   keep<TAB><name>   leave a deliberately-chosen column alone
+#   offboard<TAB>     the item is on no board; there is nothing to reset
+#   unreadable<TAB>   the read failed; do not touch the column
+unclaim_status() {
+  local cur rc=0
+  cur="$(item_status "$1" 2>/dev/null)" || rc=$?
+  case "$rc" in
+    0) if [ -z "$cur" ] || [ "$cur" = "$CLAIM_STATUS" ]; then printf 'write\tReady\n'
+       else printf 'keep\t%s\n' "$cur"; fi ;;
+    2) printf 'offboard\t\n' ;;
+    *) printf 'unreadable\t\n' ;;
+  esac
+}
+
 # ---- set-field: resolve project/field/item/option ids from cache, one narrow mutation -----------
 set_field() {
   local ref="$1" field="$2" value="$3" refresh="${4:-}"
@@ -944,7 +1017,7 @@ lint_items() {
           status: fieldValueByName(name:"Status"){ ... on ProjectV2ItemFieldSingleSelectValue{ name } }
           content{
             __typename
-            ... on Issue{ number title state url repository{ nameWithOwner }
+            ... on Issue{ number title state url body repository{ nameWithOwner }
               subIssues(first:100){ totalCount nodes{ number state repository{ nameWithOwner } } } }
           }
         }
@@ -965,6 +1038,7 @@ lint_items() {
       | { repo:.content.repository.nameWithOwner, number:.content.number,
           title:(.content.title // ""), url:(.content.url // null),
           state:(.content.state // null), status:(.status.name // null),
+          body:(.content.body // ""),
           childTotal:(.content.subIssues.totalCount // 0),
           children:[ .content.subIssues.nodes[]?
                      | { ref:"\(.repository.nameWithOwner)#\(.number)", state:.state } ] }' <<<"$out" >> "$tmp"
@@ -991,6 +1065,18 @@ lint_items() {
 #                           epics: a CLOSED epic over an open child is the sharpest form of the bug.
 #   EPIC-CHILDREN-TRUNCATED an epic with more than 100 children — the scan cannot see them all, so
 #                           EPIC-DONE-OPEN-CHILD cannot be trusted for it. Fail loudly, never guess.
+#   EPIC-UNLINKED-CHILD     an epic whose BODY declares a child (a `- [ ]`/`- [x]` line naming an
+#                           issue) that is not in its sub-issue graph. Rollup reads the graph, so such
+#                           a child is invisible to it and the epic can complete over an open child.
+#                           Scoped to epics whose child list is not truncated — otherwise the missing
+#                           children are an artifact of the scan, not of the link. A body ref that
+#                           resolves to a PULL REQUEST is skipped, not flagged: GitHub refuses to link
+#                           a PR as a sub-issue, so citing the PR that closed a checklist line is not
+#                           an unlinked child (FS-GG/.github#346). Deliberately NOT scoped to OPEN
+#                           epics (unlike EPIC-NO-CHILDREN): a CLOSED epic whose body declares an
+#                           unlinked child that is itself still open is the one case EPIC-DONE-OPEN-
+#                           CHILD cannot catch, because that child is absent from the graph it reads.
+#                           Fix: `coord child`.
 #
 # A NOTE (not a failure) is printed for `Status: Done` on an issue that is still open: it is how the
 # board legitimately looks between "the PR merged" and "someone closed the epic", so it fails only
@@ -1011,7 +1097,7 @@ lint() {
 
   local items findings
   items="$(lint_items)"
-  findings="$(jq --arg repo "$repo" '
+  findings="$(jq --arg repo "$repo" "$JQ_BODY_CHILD_REFS"'
     def repo_match($f): ($f|ascii_downcase) as $q
       | (.repo // "" | ascii_downcase) as $r
       | ($q=="") or ($r==$q) or (($r|split("/")|last // "")==$q);
@@ -1030,10 +1116,24 @@ lint() {
         ( .[] | select(is_epic and .status == "Done" and (.children | any(.state == "OPEN")))
           | { code:"EPIC-DONE-OPEN-CHILD", severity:"error", id:.id, status:.status, url:.url,
               detail:"board says Done, but open child: \([.children[]|select(.state=="OPEN")|.ref|short]|join(", "))" } ),
+        ( .[] | select(is_epic and .childTotal == (.children|length))
+          | . as $e
+          | ($e.body | body_child_refs($e.repo)) as $declared
+          | ($declared - [ $e.children[].ref ]) as $unlinked
+          | select($unlinked | length > 0)
+          | { code:"EPIC-UNLINKED-CHILD", severity:"error", id:.id, status:.status, url:.url,
+              unlinked:$unlinked,
+              detail:"body declares child(ren) absent from the sub-issue graph, so rollup cannot see them: \([$unlinked[]|short]|join(", "))" } ),
         ( .[] | select(.status == "Done" and .state == "OPEN")
           | { code:"DONE-STATUS-OPEN-ISSUE", severity:"note", id:.id, status:.status, url:.url,
               detail:"board Status is Done but the issue is still open" } )
       ]' <<<"$items")"
+
+  # A body-declared ref that resolves to a PR is not an unlinked child — a PR can never be a
+  # sub-issue. Drop those before counting or printing, so the gate stops going red on an epic that
+  # merely cites the PR that closed a checklist line (FS-GG/.github#346). Also strips the internal
+  # `unlinked` scratch field, restoring the finding schema.
+  findings="$(prune_pr_unlinked "$findings")"
 
   if [ -n "$json" ]; then jq '.' <<<"$findings"; else
     jq -r '.[] | "FSGG-LINT \(.severity|ascii_upcase)  \(.code)  \(.id|sub("^[^/]+/";""))  — \(.detail)"' <<<"$findings"
@@ -1078,21 +1178,105 @@ banner() {   # $1=done|fail  $2=line1  $3=line2  — two full-width rows
   printf '%s%-*s%s\n' "$on" "$cols" "  $l2" "$off"
 }
 
+# ---- body_child_refs: the epic's OTHER record of its children -------------------------------------
+# `epic_rollup` and `lint` both need to ask "which children does this epic's BODY claim?", and two
+# hand-copied regexes in two engines is precisely the drift surface this file warns about elsewhere.
+# One definition, injected into both jq programs.
+#
+# A child is declared by a markdown TASK-LIST line — `- [ ]` / `- [x]` — that names an issue. The
+# FIRST ref on the line is the child, so `- [x] (b) #268 — matched by substring (cf. #100)` declares
+# #268 and not #100; prose, tables and links elsewhere in the body declare nothing. A ref may be
+# `#n`, `owner/repo#n`, or a full issue URL, and all three canonicalize to `owner/repo#n` against
+# the epic's own repo — the same form `lint_items` builds for the sub-issue graph, so the two sets
+# are directly comparable.
+#
+# All THREE markdown bullets are accepted (`-`, `*`, `+`). GitHub renders a task list for each, so a
+# matcher that knows only `-` would read an epic written with `+` as declaring NO children — and the
+# gate below would wave it through. A gate that fails open on a formatting choice is the bug this
+# whole epic is about.
+JQ_BODY_CHILD_REFS='
+def body_child_refs($self):
+  (. // "") | split("\n")
+  | map(select(test("^[ \t]{0,3}[-*+][ \t]+\\[[ xX]\\][ \t]")))
+  | map([ scan("([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)#([0-9]+)|https?://github\\.com/([^/[:space:]]+)/([^/[:space:]]+)/issues/([0-9]+)|#([0-9]+)") ] | first)
+  | map(select(. != null))
+  | map( if   .[0] then "\(.[0])#\(.[1])"
+         elif .[2] then "\(.[2])/\(.[3])#\(.[4])"
+         else "\($self)#\(.[5])" end )
+  | unique;
+'
+
+# ---- ref_is_pr / drop_pr_refs / prune_pr_unlinked: a body-declared "child" that is really a PR ----
+# `lint` (EPIC-UNLINKED-CHILD) and `epic_rollup` both take the epic's body refs MINUS its sub-issue
+# graph and treat the remainder as unlinked children. But GitHub refuses to link a PULL REQUEST as a
+# sub-issue, so a task-list line citing the PR that closed it — `- [x] … (PR #243)` — declares a ref
+# the graph can NEVER hold. Left alone it wedges the gate red forever on genuinely-complete work, and
+# a gate that is red on correct work is one people learn to ignore (FS-GG/.github#346, arriving at
+# #266 from the other side). So re-resolve the OTHERWISE-UNLINKED refs — only that set, typically
+# empty, so a healthy board pays nothing — and drop the ones GitHub reports as PRs.
+#
+# A ref that will not resolve (404, network, rate-limit) is KEPT, not dropped: per FS-GG/.github#266
+# an unverifiable subject must not clear a gate, and "I could not check" is not "it is a PR". One
+# REST call each (the separate 5,000/hr budget), and only for refs that would otherwise fail the gate.
+ref_is_pr() {  # <owner/repo#n> — exit 0 iff GitHub confirms the ref is a pull request
+  local ref="$1" o r n pr
+  [[ "$ref" =~ ^([^/]+)/([^#]+)#([0-9]+)$ ]] || return 1
+  o="${BASH_REMATCH[1]}"; r="${BASH_REMATCH[2]}"; n="${BASH_REMATCH[3]}"
+  pr="$(gh api "repos/$o/$r/issues/$n" --jq '.pull_request.url // empty' 2>/dev/null)" || return 1
+  [ -n "$pr" ]
+}
+drop_pr_refs() {  # filter refs on stdin (one per line) to those that are NOT pull requests
+  local ref
+  while IFS= read -r ref; do
+    [ -n "$ref" ] || continue
+    ref_is_pr "$ref" && continue
+    printf '%s\n' "$ref"
+  done
+}
+# Rewrite a lint findings array: drop PR refs from every EPIC-UNLINKED-CHILD, delete a finding left
+# with no genuine unlinked child, and rebuild its detail line. Each ref is probed at most once.
+prune_pr_unlinked() {  # <findings-json> -> findings-json
+  local findings="$1" refs ref prs="" prjson
+  refs="$(jq -r '[.[] | select(.code=="EPIC-UNLINKED-CHILD") | .unlinked[]] | unique[]?' <<<"$findings")"
+  [ -n "$refs" ] || { printf '%s' "$findings"; return 0; }
+  while IFS= read -r ref; do
+    [ -n "$ref" ] || continue
+    ref_is_pr "$ref" && prs="$prs$ref"$'\n'
+  done <<<"$refs"
+  prjson="$(printf '%s' "$prs" | jq -R -s 'split("\n") | map(select(length > 0))')"
+  jq --argjson prs "$prjson" '
+    def short: sub("^[^/]+/";"");
+    map( if .code == "EPIC-UNLINKED-CHILD"
+         then (.unlinked - $prs) as $u
+              | if ($u | length) == 0 then empty
+                else .unlinked = $u
+                     | .detail = "body declares child(ren) absent from the sub-issue graph, so rollup cannot see them: " + ([$u[] | short] | join(", "))
+                end
+         else . end )
+    | map(del(.unlinked))' <<<"$findings"
+}
+
 # ---- epic_rollup: after a child flips to Done, walk parents UPWARD and flip each epic whose children
 # are now ALL board-Done AND CLOSED, stamping each one that rolls up. One thrifty query per level (subIssues +
 # a Status resolver each); runs only from `done --flip`. Bounded to 10 levels as a cycle backstop.
 # An already-Done epic is walked THROUGH silently (no re-stamp); a not-yet-complete epic prints a
 # one-line progress note and stops the climb.
+#
+# The graph is AUTHORITATIVE for what rolls up; the body is the cross-check that the graph is not
+# missing anyone. A child named in the body but absent from `subIssues` means the roll-up is counting
+# fewer children than the epic itself claims to have — "all children Done" is then a statement about
+# a set we know to be incomplete, and per FS-GG/.github#266 an unverifiable subject must not report
+# green. We refuse, and name the unlinked children (FS-GG/.github#325).
 epic_rollup() {
   local child="$1" boardnum depth=0 cur="$1"
   boardnum="$(board_get '.number')"
   local q='query($owner:String!, $repo:String!, $num:Int!){
     repository(owner:$owner, name:$repo){ issue(number:$num){
       parent{
-        number url repository{ nameWithOwner }
+        number url body repository{ nameWithOwner }
         projectItems(first:20){ nodes{ project{ number }
           status: fieldValueByName(name:"Status"){ ... on ProjectV2ItemFieldSingleSelectValue{ name } } } }
-        subIssues(first:100){ totalCount nodes{ number state
+        subIssues(first:100){ totalCount nodes{ number state repository{ nameWithOwner }
           projectItems(first:20){ nodes{ project{ number }
             status: fieldValueByName(name:"Status"){ ... on ProjectV2ItemFieldSingleSelectValue{ name } } } } } }
       }
@@ -1129,11 +1313,33 @@ epic_rollup() {
         | select(.state == "CLOSED")
         | ([.projectItems.nodes[]? | select(.project.number==$pn) | .status.name] | first // "")
         | select(. == "Done")] | length' <<<"$out")"
-    [ "$total" = "0" ] && break
+    # Truncation first: a child list the query could not see whole would make every set comparison
+    # below (and the `unlinked` one especially) a guess.
     if [ "$seen" != "$total" ]; then
       printf '  epic %s: %s sub-issues, only %s visible — not rolling up (cannot verify)\n' \
         "$p_lbl" "$seen" "$total"; break
     fi
+    # Now the graph is known-whole, so the body's claim can be checked against it. Declared-but-not-
+    # linked means the roll-up would count a set it already knows is short. Refuse, and say who.
+    local unlinked
+    unlinked="$(jq -r --arg self "$p_or" "$JQ_BODY_CHILD_REFS"'
+      .data.repository.issue.parent as $p
+      | ($p.body | body_child_refs($self)) as $declared
+      | [ $p.subIssues.nodes[]? | "\(.repository.nameWithOwner)#\(.number)" ] as $linked
+      | ($declared - $linked)[]' <<<"$out")"
+    # A body ref that is really a PR can never be a sub-issue, so it is not a missing child — dropping
+    # it lets an epic that cites the PR which delivered a checklist line still roll up (.github#346).
+    # An unresolvable ref is kept, so the rollup still refuses rather than guessing (#266).
+    unlinked="$(printf '%s\n' "$unlinked" | drop_pr_refs)"
+    if [ -n "$unlinked" ]; then
+      # `paste -sd', '` would CYCLE the two delimiters (a,b c,d). Join on ',' and space it after.
+      printf '  epic %s: body declares %s child(ren) the sub-issue graph does not contain — not rolling up: %s\n' \
+        "$p_lbl" "$(printf '%s\n' "$unlinked" | wc -l | tr -d ' ')" \
+        "$(printf '%s\n' "$unlinked" | paste -sd, - | sed 's/,/, /g')"
+      printf '  link them, then re-run:  fsgg-coord child %s <issue>\n' "$p_lbl"
+      break
+    fi
+    [ "$total" = "0" ] && break
 
     if [ "$done" != "$total" ]; then
       printf '  epic %s: %s/%s children Done+closed — holding (not rolling up)\n' "$p_lbl" "$done" "$total"; break
@@ -1146,6 +1352,60 @@ epic_rollup() {
     fi
     cur="$p_or#$p_num"
   done
+}
+
+# ---- child: link an issue as a native SUB-ISSUE of a parent --------------------------------------
+# The edge `epic_rollup` walks is the sub-issue graph, and NOTHING else creates it. A `(j) child of
+# #266` title, a `Child of #266` comment, a body checklist line — all of them LOOK like a link and
+# none of them is one. That is how an epic got stamped Done thirty minutes after an open child of it
+# was filed (FS-GG/.github#325).
+#
+# Two traps live in this endpoint, so they live in exactly one place. It wants the child's REST
+# **id** (a large integer), not its issue number; and `gh api -f` would send that id as a JSON
+# string, which the API rejects with a 422 — it must be `-F`, which types the value.
+child_cmd() {
+  local parent="" child=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      -*) die "child: unknown flag '$1'." ;;
+      *)  if   [ -z "$parent" ]; then parent="$1"
+          elif [ -z "$child" ];  then child="$1"
+          else die "child: unexpected argument '$1'."; fi; shift ;;
+    esac
+  done
+  [ -n "$parent" ] && [ -n "$child" ] \
+    || die "child: <parent> <issue> required (URL, owner/repo#n, or repo#n)."
+
+  parse_ref "$parent"; local po="$R_OWNER" pp="$R_REPO" pn="$R_NUM"
+  parse_ref "$child";  local co="$R_OWNER" cp="$R_REPO" cn="$R_NUM"
+
+  local cid
+  cid="$(gh api "repos/$co/$cp/issues/$cn" --jq '.id' 2>/dev/null)" \
+    || die "child: cannot read $co/$cp#$cn — does it exist?"
+  [ -n "$cid" ] || die "child: cannot read $co/$cp#$cn — does it exist?"
+
+  # Idempotent by ID, not by number: two repos can each have an issue #7. Re-linking is success, so
+  # a worker re-running the close-out never has to reason about whether the edge already exists.
+  #
+  # The read's exit status is KEPT. `2>/dev/null`-ing it would make "I could not reach the API" look
+  # exactly like "the edge is not there" — we would POST, collect a 422, and blame the token. That is
+  # the #266 defect (and #320's, precisely) reappearing inside the fix for it: an unreachable subject
+  # must not be reported as an absent one.
+  local existing rc=0
+  existing="$(gh api "repos/$po/$pp/issues/$pn/sub_issues" --paginate --jq '.[].id')" || rc=$?
+  [ "$rc" -eq 0 ] \
+    || die "child: cannot read $pp#$pn's sub-issues (rc=$rc) — refusing to guess whether $cp#$cn is already linked."
+  if printf '%s\n' "$existing" | grep -qx "$cid"; then
+    printf 'child: %s#%s is already a sub-issue of %s#%s — nothing to do\n' "$cp" "$cn" "$pp" "$pn"
+    return 0
+  fi
+
+  # Surface gh's own diagnosis rather than guessing one: a 422 (already linked, or a cross-repo link
+  # GitHub refuses) and a 403 (no `issues: write`) are different problems with different fixes.
+  local err
+  err="$(gh api "repos/$po/$pp/issues/$pn/sub_issues" -F sub_issue_id="$cid" 2>&1 >/dev/null)" \
+    || die "child: could not link $cp#$cn under $pp#$pn — $err"
+  printf 'linked %s#%s as a sub-issue of %s#%s  ·  `done --flip` can now see it\n' "$cp" "$cn" "$pp" "$pn"
 }
 
 done_cmd() {
@@ -1391,8 +1651,8 @@ claim_cmd() {
   # A SUBSHELL, not just a redirect: set_field's `die` is an `exit`, and the board flip is strictly
   # best-effort — the lock is already held, so a board that rejects the write must not unwind a claim.
   local boardnote
-  if ( set_field "$ref" Status "In progress" ) >/dev/null 2>&1; then
-    boardnote="board: In progress"
+  if ( set_field "$ref" Status "$CLAIM_STATUS" ) >/dev/null 2>&1; then
+    boardnote="board: $CLAIM_STATUS"
   else
     boardnote="note: not on board '$TITLE' (the marker is the lock; add it to sequence it)"
   fi
@@ -1441,11 +1701,29 @@ heartbeat_cmd() {
 # ---- release: drop the lock. Delete our marker, unassign, and return the item to the pool. --------
 # Releasing a claim held by ANOTHER worker needs --force: an accidental release is how two workers end
 # up on one item, which is the failure this protocol exists to prevent.
+# ---- release: "drop the lease" and "this item is startable" are two different claims (#331) ------
+# `claim` sets Status=In progress. Releasing the lease undoes THAT, and only that. Every other status
+# on the item was chosen deliberately — Blocked, Backlog, In review, Done — and a release that forced
+# `Ready` over it silently reverted its author. The documented blocked-item sequence
+#
+#     set-field <i> 'Blocked by' <ref>;  set-field <i> Status Blocked;  release <i>
+#
+# therefore could not produce its own documented end state: the board ended up asserting `Ready` on a
+# row whose `Blocked by` named an open issue. Self-contradicting, and regenerated every time a worker
+# followed the protocol. (Not a scheduler fail-open — `batch` derives blockedness from `Blocked by`,
+# not from `Status` — but the board is a record humans read, and `check-board` had to keep repairing
+# what `release` kept breaking.)
+#
+# A status we could not READ is not a status we may overwrite: forcing `Ready` over an unknown one is
+# the same defect a turn further in. An unreadable Status writes nothing and says so.
+#
+# `--status S` still wins outright. That is the caller stating the end state, rather than release
+# guessing it.
 release_cmd() {
-  local ref="" status="Ready" force=""
+  local ref="" status="" explicit="" force=""
   while [ $# -gt 0 ]; do
     case "$1" in
-      --status) status="${2:?--status needs a value}"; shift 2 ;;
+      --status) status="${2:?--status needs a value}"; explicit=1; shift 2 ;;
       --force)  force=1; shift ;;
       -*)       die "release: unknown flag '$1'." ;;
       *)        [ -z "$ref" ] && ref="$1" || die "release: unexpected argument '$1'."; shift ;;
@@ -1472,9 +1750,28 @@ release_cmd() {
   done < <(jq -r --arg w "$w" --arg f "${force:-}" '.[] | select($f != "" or .worker == $w) | .id' <<<"$claims")
 
   gh issue edit "$R_NUM" --repo "$R_OWNER/$R_REPO" --remove-assignee "@me" >/dev/null 2>&1 || true
-  local boardnote
-  if ( set_field "$ref" Status "$status" ) >/dev/null 2>&1; then boardnote="board: $status"
-  else boardnote="note: not on board '$TITLE'"; fi
+
+  # The marker is gone by here, so the lease is ALREADY dropped. Nothing below may abort the release
+  # — a board that cannot be read or written leaves the column alone and reports that, exactly as it
+  # has always done for a board write that failed.
+  local boardnote=""
+  if [ -z "$explicit" ]; then
+    local act val
+    IFS=$'\t' read -r act val < <(unclaim_status "$ref")
+    case "$act" in
+      write) status="$val" ;;
+      keep)  boardnote="board: $val (preserved — release resets only the '$CLAIM_STATUS' claim set)" ;;
+      offboard) boardnote="note: not on board '$TITLE'" ;;
+      *)     boardnote="note: Status unchanged — could not read it"
+             echo "fsgg-coord: release: could not read $R_REPO#$R_NUM Status. The lease IS dropped; the board column is untouched." >&2
+             echo "  set it yourself if it still says '$CLAIM_STATUS': fsgg-coord set-field $ref Status Ready" >&2 ;;
+    esac
+  fi
+
+  if [ -z "$boardnote" ]; then
+    if ( set_field "$ref" Status "$status" ) >/dev/null 2>&1; then boardnote="board: $status"
+    else boardnote="note: not on board '$TITLE'"; fi
+  fi
   printf 'released %s (worker %s)  ·  %s\n' "$R_REPO#$R_NUM" "$w" "$boardnote"
 }
 
@@ -1620,6 +1917,14 @@ paths_of() {  # $1=owner $2=repo $3=num -> one normalized touch-set token per li
 }
 # The comparison core, shared by `overlap`, `batch`, `take`, and `widen`. Two newline-separated token
 # lists in; the conflicting pairs out (empty = disjoint). Subtree containment in either direction.
+#
+# CONTRACT — both token lists MUST come from the SAME repo. `Paths:` tokens are repo-relative, so
+# `scripts/fsgg-coord` in repo A and `scripts/fsgg-coord` in repo B name two different files; this
+# function cannot see the repo and will happily report them as colliding (#353). Every caller is
+# therefore responsible for confining its inputs to one repo before calling: `batch`/`widen`/`overlap
+# --active` pass that repo to `active_claims` so the compared claims are same-repo, and the pairwise
+# `overlap a b` short-circuits to DISJOINT when its two refs resolve to different repos. Hand this
+# cross-repo token lists and it invents collisions.
 conflicts_between() {
   local a="$1" b="$2"
   [ -n "$a" ] && [ -n "$b" ] || return 0
@@ -1801,7 +2106,7 @@ overlap_cmd() {
   # --- <a> against every in-flight claim -----------------------------------------------------------
   if [ -n "$against_active" ]; then
     [ -z "$b" ] || die "overlap: --active takes one issue ref, not two."
-    parse_ref "$a"; local ar="$R_REPO" an="$R_NUM" aid="$R_OWNER/$R_REPO#$R_NUM"
+    parse_ref "$a"; local ar="$R_REPO" an="$R_NUM" ao="$R_OWNER" aid="$R_OWNER/$R_REPO#$R_NUM"
     local pa; pa="$(paths_for_ref "$a")"
     [ -n "$pa" ] || { echo "overlap: no 'Paths:' touch-set declared on $ar#$an — add one to schedule it." >&2; return 2; }
     local abad; abad="$(invalid_paths "$pa")"
@@ -1813,7 +2118,11 @@ overlap_cmd() {
     fi
 
     local claims n=0 i=0 found=0
-    claims="$(active_claims)"
+    # Scope to <a>'s own repo, for the same reason `widen` and `batch` do: `Paths:` tokens are
+    # repo-relative, so a claim in another repo can never share a file with <a>, and comparing across
+    # the boundary only manufactures phantom overlaps (#353). "against every in-flight claim" means
+    # every claim that could actually contend for <a>'s files — which is every claim in <a>'s repo.
+    claims="$(active_claims "$ao/$ar")"
     n="$(jq 'length' <<<"$claims")"
     # An in-flight claim whose own touch-set is unmatchable reserves NOTHING, so clearing <a> against
     # it would be an answer about a surface we cannot see. Refuse before comparing against any of them.
@@ -1848,8 +2157,17 @@ overlap_cmd() {
 
   # --- pairwise -------------------------------------------------------------------------------------
   [ -n "$b" ] || die "overlap: two issue refs required (overlap <a> <b>), or pass --active."
-  parse_ref "$a"; local ar="$R_REPO" an="$R_NUM"
-  parse_ref "$b"; local br="$R_REPO" bn="$R_NUM"
+  parse_ref "$a"; local ar="$R_REPO" an="$R_NUM" ao="$R_OWNER"
+  parse_ref "$b"; local br="$R_REPO" bn="$R_NUM" bo="$R_OWNER"
+  # `Paths:` tokens are repo-relative, so two items in DIFFERENT repos never name the same file — they
+  # live in separate checkouts and can always run in parallel. Answer that directly rather than handing
+  # cross-repo tokens to `conflicts_between`, which cannot see a repo and would read a shared prefix
+  # (`scripts/fsgg-coord` ⇄ `scripts/fsgg-coord`) as a phantom overlap (#353). Compare the NORMALIZED
+  # owner/repo, so `SDD#1` and `FS-GG/FS.GG.SDD#2` still count as one repo.
+  if [ "$ao/$ar" != "$bo/$br" ]; then
+    printf 'DISJOINT — %s and %s are in different repos; their touch-sets cannot overlap.\n' "$ar#$an" "$br#$bn"
+    return 0
+  fi
   local pa pb; pa="$(paths_for_ref "$a")"; pb="$(paths_for_ref "$b")"
   if [ -z "$pa" ] || [ -z "$pb" ]; then
     local which=""
@@ -1981,12 +2299,19 @@ reap_cmd() {
     # `reap` now collects claims on items the board never had (that is the point of finding them by
     # marker), so the Status write can legitimately have nothing to write to. Report what actually
     # happened rather than asserting a board mutation we may not have performed.
-    local rnote
-    if ( set_field "$r#$num" Status Ready ) >/dev/null 2>&1; then
-      rnote="board: Ready"
-    else
-      rnote="not on board (marker cleared; nothing to reset)"
-    fi
+    #
+    # Reaping UNDOES a claim, exactly as `release` does, so it owes the board the same answer and
+    # asks the same question (#331). A worker whose lease expired on an item it had marked `Blocked`
+    # must not have that column reset to `Ready` on its way out.
+    local rnote ract rval
+    IFS=$'\t' read -r ract rval < <(unclaim_status "$r#$num")
+    case "$ract" in
+      write) if ( set_field "$r#$num" Status "$rval" ) >/dev/null 2>&1; then rnote="board: $rval"
+             else rnote="not on board (marker cleared; nothing to reset)"; fi ;;
+      keep)  rnote="board: $rval (preserved)" ;;
+      offboard)   rnote="not on board (marker cleared; nothing to reset)" ;;
+      *)          rnote="board: Status unchanged — could not read it (marker cleared)" ;;
+    esac
     printf 'reaped  %s#%s  worker %s  (idle %sm)  ·  %s\n' "$rp" "$num" "$cw" "$age" "$rnote"
   done
   [ -z "$apply" ] && echo "fsgg-coord: dry run — pass --apply to release these." >&2
@@ -2293,7 +2618,15 @@ widen_cmd() {
   # Re-check against everything in flight, and notify each worker we now collide with.
   local pa claims n i=0 found=0
   pa="$(paths_of "$so" "$sr" "$sn")"
-  claims="$(active_claims)"
+  # Scope to THIS item's repo, exactly as `batch` does (`active_claims "$repo"`). `Paths:` tokens are
+  # repo-relative, so comparing `self`'s tokens against a claim in ANOTHER repo compares two strings
+  # that name files in two different repositories — `conflicts_between` sees a shared prefix and
+  # invents a collision, which stops a worker who has nothing to stop for and posts a false
+  # "sequence one behind the other" notice onto a stranger's item (#353). A cross-repo claim can
+  # never share a (repo-relative) file with this item, so it is correct to leave it out of the scan;
+  # doing so also makes `widen` coherent with `batch`, which would schedule the very pair `widen`
+  # otherwise insists collides.
+  claims="$(active_claims "$so/$sr")"
   n="$(jq 'length' <<<"$claims")"
   # The widen itself has landed (that is `widen`'s job, and it is how a bad declaration gets FIXED —
   # including on an item that is itself held). But the re-check against in-flight work is only as
@@ -2462,6 +2795,7 @@ case "$cmd" in
   ready)     ready "$@" ;;
   next)      next "$@" ;;
   lint)      lint "$@" ;;
+  child)     child_cmd "$@" ;;
   done)      done_cmd "$@" ;;
   whoami)    whoami_cmd ;;
   claim)     claim_cmd "$@" ;;
