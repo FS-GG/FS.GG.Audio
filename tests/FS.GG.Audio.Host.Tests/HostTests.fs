@@ -44,6 +44,25 @@ let private sampleWav () : byte[] =
     w.Flush()
     ms.ToArray()
 
+// Counting fake of the device operations a VoicePool drives, so its reclaim/steal logic runs with
+// no OpenAL device (#20). `Gen` hands out ascending handles; `IsStopped` consults a controllable
+// set; `Stop`/`Delete` just record the handles they were called with.
+type private VoicePoolFake() =
+    let mutable nextId = 0u
+    let genCalls = ResizeArray<uint>()
+    let stopCalls = ResizeArray<uint>()
+    let deleteCalls = ResizeArray<uint>()
+    let stopped = System.Collections.Generic.HashSet<uint>()
+    member _.GenCount = genCalls.Count
+    member _.StopCalls = List.ofSeq stopCalls
+    member _.DeleteCalls = List.ofSeq deleteCalls
+    member _.MarkStopped(h: uint) = stopped.Add h |> ignore
+    member _.Ops : VoicePool.Ops =
+        { Gen = (fun () -> nextId <- nextId + 1u; genCalls.Add nextId; nextId)
+          IsStopped = (fun h -> stopped.Contains h)
+          Stop = (fun h -> stopCalls.Add h)
+          Delete = (fun h -> deleteCalls.Add h) }
+
 [<Tests>]
 let tests =
     testList "FS.GG.Audio.Host" [
@@ -152,5 +171,95 @@ let tests =
             Expect.isNone
                 (Wav.tryParse (System.Text.Encoding.ASCII.GetBytes "NOTAWAVEFILE...."))
                 "bad header -> None"
+        }
+
+        // --- #20: the WAV-cache and voice-reclaim seams, unit-tested without a device. ---
+
+        test "BufferCache uploads once per id and reuses the handle thereafter (#20)" {
+            // The old backend re-parsed + re-uploaded an asset on every play; the cache uploads once.
+            let cache = BufferCache.T<SoundId>()
+            let mutable creates = 0
+            let create () = creates <- creates + 1; Some 42u
+            let first = cache.GetOrAdd(SoundId "s", create)
+            let second = cache.GetOrAdd(SoundId "s", create)
+            Expect.equal first (Some 42u) "first miss uploads and returns the handle"
+            Expect.equal second (Some 42u) "second play returns the same cached handle"
+            Expect.equal creates 1 "the asset is decoded/uploaded once, not per play"
+            Expect.equal cache.Count 1 "one distinct handle is held"
+        }
+
+        test "BufferCache keys handles by id and lists every one for disposal (#20)" {
+            let cache = BufferCache.T<SoundId>()
+            cache.GetOrAdd(SoundId "a", fun () -> Some 1u) |> ignore
+            cache.GetOrAdd(SoundId "b", fun () -> Some 2u) |> ignore
+            // A hit must not re-create, even when the create thunk would return a different handle.
+            cache.GetOrAdd(SoundId "a", fun () -> Some 99u) |> ignore
+            Expect.equal cache.Count 2 "two distinct ids -> two handles"
+            Expect.equal (Set.ofArray cache.Handles) (Set.ofList [ 1u; 2u ]) "every uploaded handle is listed for deletion"
+        }
+
+        test "BufferCache does not cache a failed upload, so a later resolve still populates (#20)" {
+            let cache = BufferCache.T<SoundId>()
+            let mutable resolvable = false
+            let create () = if resolvable then Some 7u else None
+            Expect.equal (cache.GetOrAdd(SoundId "s", create)) None "an unresolved/unparseable asset yields None"
+            Expect.equal cache.Count 0 "a failed upload is not cached"
+            resolvable <- true
+            Expect.equal (cache.GetOrAdd(SoundId "s", create)) (Some 7u) "a later successful resolve populates the entry"
+            Expect.equal cache.Count 1 "now cached"
+        }
+
+        test "VoicePool reclaims finished voices and reuses their handles instead of leaking (#20)" {
+            // This is the leak in #20: one-shots were allocated and never reclaimed. Here, once the
+            // handed-out voices finish, the next Acquire reuses a handle rather than allocating more.
+            let fake = VoicePoolFake()
+            let pool = VoicePool.T(fake.Ops, 240)
+            let handles = [ for _ in 1..3 -> pool.Acquire() ]
+            Expect.equal fake.GenCount 3 "three sounding voices -> three allocations"
+            Expect.equal pool.ActiveCount 3 "all three are active"
+            for h in handles do fake.MarkStopped h
+            let reused = pool.Acquire()
+            Expect.equal fake.GenCount 3 "a finished voice is reclaimed and reused — no new allocation"
+            Expect.isTrue (List.contains reused handles) "the reused handle is one already reclaimed"
+            Expect.isFalse pool.HasStolen "reuse is not a steal"
+        }
+
+        test "VoicePool steals the oldest voice at the ceiling rather than failing silently (#20)" {
+            // Nothing ever stops, so the pool hits its ceiling with every voice sounding. Past it, the
+            // oldest is stopped and its handle reused — a defined oldest-drop, and HasStolen lets the
+            // backend log the ceiling once instead of dropping audio silently.
+            let fake = VoicePoolFake()
+            let pool = VoicePool.T(fake.Ops, 2)
+            let first = pool.Acquire()
+            pool.Acquire() |> ignore
+            let stealer = pool.Acquire()
+            Expect.equal fake.GenCount 2 "past the ceiling no new handle is allocated"
+            Expect.equal fake.StopCalls [ first ] "the oldest voice is stopped so its handle can be reused"
+            Expect.equal stealer first "the stolen (oldest) handle is the one handed back"
+            Expect.equal pool.ActiveCount 2 "the pool stays at its ceiling"
+            Expect.isTrue pool.HasStolen "the steal is visible, so the backend can log it once"
+        }
+
+        test "VoicePool clamps a non-positive ceiling to at least one voice (no empty-pool steal) (#20)" {
+            let fake = VoicePoolFake()
+            let pool = VoicePool.T(fake.Ops, 0)
+            // With ceiling clamped to 1, the first Acquire must allocate (not steal from an empty
+            // pool, which would have thrown), and the second must steal that one voice.
+            let first = pool.Acquire()
+            let second = pool.Acquire()
+            Expect.equal fake.GenCount 1 "clamped ceiling of 1 holds a single voice"
+            Expect.equal second first "the second Acquire steals and reuses the only voice"
+            Expect.isTrue pool.HasStolen "the ceiling is enforced, not ignored"
+        }
+
+        test "VoicePool DisposeAll stops and deletes every handle it owns (#20)" {
+            let fake = VoicePoolFake()
+            let pool = VoicePool.T(fake.Ops, 240)
+            let a = pool.Acquire()
+            let b = pool.Acquire()
+            pool.DisposeAll()
+            Expect.equal (Set.ofList fake.DeleteCalls) (Set.ofList [ a; b ]) "every owned handle is deleted"
+            Expect.equal (Set.ofList fake.StopCalls) (Set.ofList [ a; b ]) "each sounding voice is stopped before deletion"
+            Expect.equal pool.ActiveCount 0 "the pool is emptied"
         }
     ]

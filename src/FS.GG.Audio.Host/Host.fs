@@ -94,6 +94,113 @@ module Spatial =
         (p, 0.0, (if z = 0.0 then 0.0 else z))
 
 [<RequireQualifiedAccess>]
+module BufferCache =
+
+    // A device-free memo of uploaded buffer handles, keyed by a product id (SoundId/TrackId). The
+    // OpenAL backend used to parse + upload an asset on *every* play (#20); this uploads once and
+    // hands back the same handle thereafter. Pure w.r.t. the device — it only holds `uint` handles
+    // and calls back to create one — so it is exercised headless behind a fake `create`.
+    [<Sealed>]
+    type T<'k when 'k: equality>() =
+        let cache = Collections.Generic.Dictionary<'k, uint>()
+
+        // The cached handle for `key`, creating and storing it once via `create` on first miss. A
+        // `None` from `create` (unresolved / unparseable asset) is deliberately NOT cached, so a
+        // later successful resolve of the same id can still populate the entry.
+        member _.GetOrAdd(key: 'k, create: unit -> uint option) : uint option =
+            match cache.TryGetValue key with
+            | true, handle -> Some handle
+            | _ ->
+                match create () with
+                | Some handle ->
+                    cache.[key] <- handle
+                    Some handle
+                | None -> None
+
+        // Number of distinct handles held (one per successfully uploaded id).
+        member _.Count = cache.Count
+
+        // Every cached handle, for deletion when the backend is disposed.
+        member _.Handles : uint[] = Seq.toArray cache.Values
+
+[<RequireQualifiedAccess>]
+module VoicePool =
+
+    // The device operations a pool drives, named so a caller cannot transpose the two `uint -> unit`
+    // handle operations. In the OpenAL backend these are GenSource, a `SourceState = Stopped` test,
+    // SourceStop, and DeleteSource; in a test they are counting fakes, which is what lets the
+    // reclaim/steal logic run with no device (#20).
+    type Ops =
+        { Gen: unit -> uint
+          IsStopped: uint -> bool
+          Stop: uint -> unit
+          Delete: uint -> unit }
+
+    // A bounded pool of one-shot voice handles. Before handing out a source it reclaims any that
+    // have finished (the leak in #20: one-shots were GenSource'd and never deleted, so a long
+    // session exhausted OpenAL's finite source ceiling and `Play` then failed *silently*). Finished
+    // handles are reused rather than churned; past `ceiling` the oldest still-sounding voice is
+    // stolen — a defined oldest-drop, never silent failure. Music is long-lived and NOT pooled.
+    [<Sealed>]
+    type T(ops: Ops, ceiling: int) =
+        // A ceiling below 1 would make the first Acquire steal from an empty pool; clamp it so the
+        // pool always holds at least one voice and Acquire never indexes an empty list.
+        let ceiling = max 1 ceiling
+        // Handed out and presumed sounding, oldest-first.
+        let active = Collections.Generic.List<uint>()
+        // Finished handles kept for reuse, so a steady stream of one-shots does not churn Gen/Delete.
+        let free = Collections.Generic.List<uint>()
+        let mutable stolen = false
+
+        // Move every finished voice from `active` to `free`.
+        let reclaimFinished () =
+            let mutable i = 0
+            while i < active.Count do
+                if ops.IsStopped active.[i] then
+                    free.Add active.[i]
+                    active.RemoveAt i
+                else
+                    i <- i + 1
+
+        // A source handle ready to be (re)configured and played: reclaims finished voices, reuses a
+        // free handle when one exists, otherwise grows up to `ceiling`, and past it steals the
+        // oldest sounding voice and reuses that handle.
+        member _.Acquire() : uint =
+            reclaimFinished ()
+            let src =
+                if free.Count > 0 then
+                    let s = free.[free.Count - 1]
+                    free.RemoveAt(free.Count - 1)
+                    s
+                elif active.Count < ceiling then
+                    ops.Gen()
+                else
+                    stolen <- true
+                    let victim = active.[0]
+                    active.RemoveAt 0
+                    ops.Stop victim
+                    victim
+            active.Add src
+            src
+
+        // Voices handed out and presumed still sounding.
+        member _.ActiveCount = active.Count
+        // Reclaimed handles available for reuse.
+        member _.FreeCount = free.Count
+        // True once the ceiling has forced at least one oldest-voice steal — the backend logs this
+        // once, so exhaustion is visible rather than silent.
+        member _.HasStolen = stolen
+
+        // Stop and delete every handle the pool owns.
+        member _.DisposeAll() =
+            for s in active do
+                ops.Stop s
+                ops.Delete s
+            for s in free do ops.Delete s
+            active.Clear()
+            free.Clear()
+
+[<RequireQualifiedAccess>]
 module Audio =
 
     let play (backend: IAudioBackend) (effects: AudioEffect list) : unit =
@@ -145,9 +252,36 @@ module private OpenAl =
                 failwith "OpenAL: could not create context"
         do alc.MakeContextCurrent context |> ignore
 
-        let buffers = Collections.Generic.List<uint>()
-        let sources = Collections.Generic.List<uint>()
+        // Decoded buffers are uploaded once per id and reused (#20): id-keyed caches replace the old
+        // parse-and-GenBuffer-on-every-play path. Sounds and tracks live in separate id-typed caches.
+        let soundBuffers = BufferCache.T<SoundId>()
+        let trackBuffers = BufferCache.T<TrackId>()
+
+        // The music voice is long-lived (it loops and its gain is driven by bus fades), so it is
+        // tracked on its own and never pooled.
         let mutable musicSource : uint option = None
+
+        // A one-shot voice has finished — and is reclaimable — once its source reaches Stopped.
+        let sourceStopped (src: uint) : bool =
+            let mutable state = 0
+            al.GetSourceProperty(src, GetSourceInteger.SourceState, &state)
+            state = int SourceState.Stopped
+
+        // OpenAL Soft exposes a finite source ceiling (commonly ~256). Stay below it with headroom
+        // for the music voice and any driver-reserved sources; past this the pool steals the oldest.
+        let oneShotCeiling = 240
+
+        // One-shot voices are pooled so finished sources are reclaimed instead of leaked (#20).
+        let voices =
+            VoicePool.T(
+                { Gen = (fun () -> al.GenSource())
+                  IsStopped = sourceStopped
+                  Stop = (fun (s: uint) -> al.SourceStop s)
+                  Delete = (fun (s: uint) -> al.DeleteSource s) },
+                oneShotCeiling)
+
+        // Log the source-ceiling hit once (not per play), so exhaustion is visible not silent (#20).
+        let mutable ceilingLogged = false
 
         // Realized bus gains, as pushed by IMixingBackend.SetBusGain. Engine folds Sfx*Master into
         // each one-shot's gain before PlayAt, but it forwards PlayMusic to `Play` un-scaled — so the
@@ -177,7 +311,9 @@ module private OpenAl =
                 appliedMusicGain <- gain
             | _ -> ()
 
-        let loadBuffer (bytes: byte[]) : uint option =
+        // Decode + upload a WAV to a fresh AL buffer. Callers reach this only through the id-keyed
+        // caches below, so a given asset is parsed and uploaded at most once.
+        let uploadBuffer (bytes: byte[]) : uint option =
             match Wav.tryParse bytes with
             | None -> None
             | Some pcm ->
@@ -186,16 +322,34 @@ module private OpenAl =
                 | Some fmt ->
                     let buf = al.GenBuffer()
                     al.BufferData(buf, fmt, pcm.Data, pcm.SampleRate)
-                    buffers.Add buf
                     Some buf
 
-        // Every source is listener-relative with the distance model switched off, so its position is
-        // read as a pure direction and the gain we pass is the gain that plays. `position` is None
-        // for a non-positional voice, which then sits exactly at the listener (dead centre, and
-        // unattenuated no matter where the listener has moved to).
-        // OpenAL spatializes mono buffers only — a stereo asset plays centred whatever we set here.
-        let startSource (buf: uint) (loop: bool) (gain: float32) (position: (float * float * float) option) : uint =
-            let src = al.GenSource()
+        // The cached buffer for a sound/track id, uploaded once on first use (resolve failures are
+        // not cached, so a later successful resolve still populates the entry).
+        let soundBuffer (sound: SoundId) : uint option =
+            soundBuffers.GetOrAdd(
+                sound,
+                fun () ->
+                    match resolver.ResolveSound sound with
+                    | Some bytes -> uploadBuffer bytes
+                    | None -> None)
+
+        let trackBuffer (track: TrackId) : uint option =
+            trackBuffers.GetOrAdd(
+                track,
+                fun () ->
+                    match resolver.ResolveTrack track with
+                    | Some bytes -> uploadBuffer bytes
+                    | None -> None)
+
+        // Point an already-allocated source at `buf` and (re)start it. Every source is
+        // listener-relative with the distance model switched off, so its position is read as a pure
+        // direction and the gain we pass is the gain that plays. `position` is None for a
+        // non-positional voice, which then sits exactly at the listener (dead centre, unattenuated).
+        // The source must be Stopped before this reassigns its buffer — the pool (reclaimed/stolen
+        // voices) and the music path both guarantee that. OpenAL spatializes mono buffers only — a
+        // stereo asset plays centred whatever we set here.
+        let configureAndPlay (src: uint) (buf: uint) (loop: bool) (gain: float32) (position: (float * float * float) option) : unit =
             al.SetSourceProperty(src, SourceInteger.Buffer, int buf)
             al.SetSourceProperty(src, SourceBoolean.Looping, loop)
             al.SetSourceProperty(src, SourceFloat.Gain, gain)
@@ -204,16 +358,17 @@ module private OpenAl =
             let (px, py, pz) = defaultArg position (0.0, 0.0, 0.0)
             al.SetSourceProperty(src, SourceVector3.Position, float32 px, float32 py, float32 pz)
             al.SourcePlay src
-            sources.Add src
-            src
 
-        // Play a resolved one-shot; `position` None => non-positional.
+        // Play a resolved one-shot on a pooled voice; `position` None => non-positional.
         let playOneShot (sound: SoundId) (gain: float32) (position: (float * float * float) option) =
-            match resolver.ResolveSound sound with
-            | Some bytes ->
-                match loadBuffer bytes with
-                | Some buf -> startSource buf false gain position |> ignore
-                | None -> ()
+            match soundBuffer sound with
+            | Some buf ->
+                configureAndPlay (voices.Acquire()) buf false gain position
+                if voices.HasStolen && not ceilingLogged then
+                    ceilingLogged <- true
+                    eprintfn
+                        "FS.GG.Audio.Host: OpenAL one-shot source ceiling (%d) reached; stealing the oldest voice per play — overlapping sounds will be dropped."
+                        oneShotCeiling
             | None -> ()
 
         interface IAudioBackend with
@@ -233,19 +388,26 @@ module private OpenAl =
                     | SetBusVolume _
                     | Duck _ -> ()
                     | PlayMusic(track, loop) ->
-                        match resolver.ResolveTrack track with
-                        | Some bytes ->
-                            match loadBuffer bytes with
-                            | Some buf ->
-                                musicSource |> Option.iter al.SourceStop
-                                let gain = musicGain ()
-                                musicSource <- Some(startSource buf loop gain None)
-                                appliedMusicGain <- gain
-                            | None -> ()
+                        match trackBuffer track with
+                        | Some buf ->
+                            // Reuse the existing music handle across track changes rather than genning
+                            // a fresh source each time (the old path leaked the previous music source
+                            // on every PlayMusic, #20).
+                            let src =
+                                match musicSource with
+                                | Some s ->
+                                    al.SourceStop s
+                                    s
+                                | None -> al.GenSource()
+                            let gain = musicGain ()
+                            configureAndPlay src buf loop gain None
+                            musicSource <- Some src
+                            appliedMusicGain <- gain
                         | None -> ()
                     | StopMusic ->
-                        musicSource |> Option.iter al.SourceStop
+                        musicSource |> Option.iter (fun s -> al.SourceStop s; al.DeleteSource s)
                         musicSource <- None
+                        appliedMusicGain <- -1.0f
                     | SetMasterVolume level ->
                         al.SetListenerProperty(ListenerFloat.Gain, float32 level)
                 with _ ->
@@ -254,9 +416,10 @@ module private OpenAl =
 
             member _.Dispose() =
                 try
-                    for src in sources do al.SourceStop src
-                    for src in sources do al.DeleteSource src
-                    for buf in buffers do al.DeleteBuffer buf
+                    voices.DisposeAll()
+                    musicSource |> Option.iter (fun s -> al.SourceStop s; al.DeleteSource s)
+                    for buf in soundBuffers.Handles do al.DeleteBuffer buf
+                    for buf in trackBuffers.Handles do al.DeleteBuffer buf
                     alc.DestroyContext context
                     alc.CloseDevice device |> ignore
                     al.Dispose()
