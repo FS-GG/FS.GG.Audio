@@ -143,6 +143,9 @@ module VoicePool =
     // stolen — a defined oldest-drop, never silent failure. Music is long-lived and NOT pooled.
     [<Sealed>]
     type T(ops: Ops, ceiling: int) =
+        // A ceiling below 1 would make the first Acquire steal from an empty pool; clamp it so the
+        // pool always holds at least one voice and Acquire never indexes an empty list.
+        let ceiling = max 1 ceiling
         // Handed out and presumed sounding, oldest-first.
         let active = Collections.Generic.List<uint>()
         // Finished handles kept for reuse, so a steady stream of one-shots does not churn Gen/Delete.

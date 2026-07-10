@@ -240,6 +240,18 @@ let tests =
             Expect.isTrue pool.HasStolen "the steal is visible, so the backend can log it once"
         }
 
+        test "VoicePool clamps a non-positive ceiling to at least one voice (no empty-pool steal) (#20)" {
+            let fake = VoicePoolFake()
+            let pool = VoicePool.T(fake.Ops, 0)
+            // With ceiling clamped to 1, the first Acquire must allocate (not steal from an empty
+            // pool, which would have thrown), and the second must steal that one voice.
+            let first = pool.Acquire()
+            let second = pool.Acquire()
+            Expect.equal fake.GenCount 1 "clamped ceiling of 1 holds a single voice"
+            Expect.equal second first "the second Acquire steals and reuses the only voice"
+            Expect.isTrue pool.HasStolen "the ceiling is enforced, not ignored"
+        }
+
         test "VoicePool DisposeAll stops and deletes every handle it owns (#20)" {
             let fake = VoicePoolFake()
             let pool = VoicePool.T(fake.Ops, 240)
