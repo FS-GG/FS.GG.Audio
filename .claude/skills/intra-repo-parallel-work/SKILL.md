@@ -134,7 +134,20 @@ item's touch-set is **reserved**, not merely skipped.
 scripts/fsgg-coord claim <issue>            # marker + assignee + Status=In progress; prints the worktree
 scripts/fsgg-coord claim <issue> --force    # steal an item another worker holds
 scripts/fsgg-coord heartbeat <issue>        # renew the lease on a long-running claim
-scripts/fsgg-coord release <issue>          # drop it back into the pool
+scripts/fsgg-coord release <issue>          # drop the lease; In progress -> Ready
+scripts/fsgg-coord release <issue> --status Blocked   # ...drop it, but say where it lands
+scripts/fsgg-coord child <parent> <issue>   # link <issue> as a sub-issue — see §5
+```
+
+`release` drops the **lease**, which is not the same claim as *"this item is startable"*. It resets
+the `In progress` that `claim` set, and only that: a `Status` you chose deliberately — `Blocked`,
+`Backlog`, `Done` — is preserved, and a `Status` it cannot read is left alone rather than guessed.
+`reap` collects an expired lease under the same rule, so a claim that dies on a `Blocked` item does
+not resurrect it as `Ready`. So handing back an item you cannot finish keeps its column honest:
+
+```sh
+scripts/fsgg-coord set-field <issue> 'Blocked by' 'FS-GG/<repo>#<n>'
+scripts/fsgg-coord release   <issue> --status Blocked
 ```
 
 The **marker is the lock**. The assignee is set only so a human sees it on the board.
@@ -202,6 +215,43 @@ scripts/fsgg-coord done <issue> --flip     # green FSGG-DONE only after PR merge
 ```
 
 Same stamp and epic roll-up as cross-repo. Check your PR stayed inside its declaration:
+
+### If you filed an issue, LINK it — a mention is not a link
+
+`done --flip` rolls an epic up from its **native sub-issue graph**. A `(j) child of #266` title, a
+`Child of #266` comment, a line in the epic's body — each *looks* like a link, and none of them is
+one. File a child of an epic without linking it and the roll-up cannot see it, so the epic can be
+stamped `Done` over your still-open issue. That happened: an epic completed thirty minutes after an
+open child of it was filed (#325).
+
+```sh
+scripts/fsgg-coord child <parent> <new>    # the ONLY thing that creates the edge rollup reads
+```
+
+Run it the moment you file, not at close-out — the whole failure is a worker who moved on. `child`
+is idempotent, so re-running it is free. It also puts the REST API's two traps in one place: the
+endpoint keys on the child's **id**, not its number, and `gh api -f sub_issue_id=…` sends that id as
+a string and gets a 422 — it needs `-F`.
+
+`done --flip` now **refuses to roll up** an epic whose body declares a child that is not linked, and
+names it; `fsgg-coord lint` reports the same as `EPIC-UNLINKED-CHILD`. Both read the epic's body
+task-list (`- [ ]` / `- [x]` lines naming an issue) as its second, human-legible record of what its
+children are, and hold the two records to agreement.
+
+So write the body's task-list the way the matcher reads it, or it counts a child you did not mean.
+Only a `- [ ]` / `- [x]` line (also `*`/`+` bullets, `[X]`) indented **at most three spaces**
+declares a child, and only its **first** issue ref does:
+
+- **The first ref wins**, positionally in the raw line — a `#n` in a code span or a link's text
+  still counts. Put the child ref first and let an aside (`(cf. #100)`, `ties to #163`) trail, or
+  the aside becomes the declared child.
+- **A bare `#n` resolves against the epic's own repo.** `SDD#109` has no slash, so it is read as
+  `.github#109`. Write cross-repo children fully qualified: `FS-GG/FS.GG.SDD#109`.
+- **A PR is not a child** — the sub-issue graph holds issues, never PRs. Cite a line a PR delivered
+  as a **bare** `/pull/` URL (`https://github.com/FS-GG/.github/pull/239`), which carries no `#n`
+  and so declares nothing. `(PR #239)` or `[PR #239](…)` reads as an unlinked child forever.
+
+Canonical, with the live incidents: `docs/coordination/parallel-work.md` §"What the body counts as a declaration".
 
 ```sh
 scripts/fsgg-coord verify-paths --pr <n>   # files changed outside the issue's `Paths:`
