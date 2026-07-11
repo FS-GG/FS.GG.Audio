@@ -15,12 +15,21 @@ name: gate
 #
 # Those strings are the binding, they are matched LITERALLY, and they live in repo settings — out of
 # tree, which is both why this file cannot enforce them and why this comment can drift from them.
-# The trap that buys: renaming the `build-test` job's `name:`, or the `lock-ranges` job id, does not
-# relabel the required check. It makes the required context stop reporting — and a context that never
-# reports is never satisfied, so every PR blocks forever on a check that will never arrive, with
-# enforce_admins on and no bypass. Rename either and you must update the contexts in the same change:
+# The trap that buys: renaming a job does not RELABEL its required check, it makes that check stop
+# REPORTING — and a context that never reports is never satisfied, so every PR blocks forever on a
+# check that will never arrive, with enforce_admins on and no bypass. Rename `build-test`'s `name:`
+# and the contexts must move in the same change:
 #
 #     gh api repos/FS-GG/FS.GG.Audio/branches/main/protection
+#
+# And only HALF of `lock-ranges / lock-ranges` is ours to rename. The second segment is the job id
+# INSIDE FS-GG/.github's lock-range-coherence.yml, which the `uses:` below tracks at the moving ref
+# @main. That rename can therefore land in a repo Audio does not own, in a commit nobody here
+# reviews, and deadlock every PR to this branch with nothing in Audio having changed. Audio is the
+# first FS-GG repo to require a reusable-workflow-nested context, so it is the first exposed to it:
+# filed as FS-GG/.github#549, which asks for the check that would ASSERT this (every required context
+# is one that something still reports) instead of leaving it to whoever remembers to read this
+# comment — the same "assert, don't remember" the lock-ranges block below is built on.
 #
 # `kit / coordination-kit` reports on PRs here but is deliberately NOT required, matching
 # FS.GG.SDD and FS.GG.Rendering: both report it, neither gates on it.
