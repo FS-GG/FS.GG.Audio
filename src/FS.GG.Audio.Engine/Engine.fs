@@ -188,3 +188,32 @@ module Engine =
     let fadeBus (engine: T) (bus: Bus) (target: float) (seconds: float) = engine.FadeBus(bus, target, seconds)
     let crossFade (engine: T) (fromBus: Bus) (toBus: Bus) (seconds: float) = engine.CrossFade(fromBus, toBus, seconds)
     let setListener (engine: T) (x: float) (y: float) (z: float) = engine.SetListener(x, y, z)
+
+    // The sink family (#27). `Host.Audio.play backend` is an `AudioEffect list -> unit` that plays
+    // STRAIGHT at the backend, so SetBusVolume/Duck are dropped and PlaySfx3D degrades — a volume
+    // slider wired that way is inaudible. These build a sink of the SAME type that steps an engine
+    // instead, so the mixing semantics apply and the safe path is the one-liner.
+    //
+    // They are `create…` rather than `sink…` because the returned closure OWNS mutable state (an
+    // engine and a clock): built once and reused per frame it mixes; rebuilt per frame it would
+    // carry a fresh engine, no envelope would ever advance, and the bug would be back (DEC-002).
+
+    let createSinkWith (dt: unit -> float) (engine: T) : AudioEffect list -> unit =
+        fun effects -> engine.Step(dt (), effects)
+
+    let createSinkOver (engine: T) : AudioEffect list -> unit =
+        // Monotonic, and immune to a wall-clock step: Stopwatch, not DateTime.
+        let clock = Diagnostics.Stopwatch.StartNew()
+        let mutable last = ValueNone
+        let dt () =
+            let now = clock.Elapsed.TotalSeconds
+            match last with
+            // The first frame advances the engine by 0, NOT by the sink's age: a sink built at
+            // startup and first driven seconds later would otherwise instantly complete any envelope
+            // installed in between (a fade set up before the loop starts).
+            | ValueNone -> last <- ValueSome now; 0.0
+            | ValueSome prev -> last <- ValueSome now; now - prev
+        createSinkWith dt engine
+
+    let createSink (backend: IAudioBackend) : AudioEffect list -> unit =
+        createSinkOver (create backend)

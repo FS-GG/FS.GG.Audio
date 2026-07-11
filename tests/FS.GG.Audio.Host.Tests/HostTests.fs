@@ -77,6 +77,50 @@ let tests =
             Expect.equal fake.Calls effects "each effect drives Play once, oldest-first"
         }
 
+        // --- #27: the raw path drops what only the Engine can realize — say so, once. ---
+
+        test "requiresEngine is true for exactly the effects a raw backend cannot realize (#27)" {
+            // The three the raw path loses: bus volume and duck are dropped, 3D degrades.
+            Expect.isTrue (HostAudio.requiresEngine (CoreAudio.setBusVolume Music 0.25)) "SetBusVolume is dropped raw"
+            Expect.isTrue (HostAudio.requiresEngine (CoreAudio.duck Music 0.5 200.0)) "Duck is dropped raw"
+            Expect.isTrue (HostAudio.requiresEngine (CoreAudio.playSfx3D (SoundId "s") 1.0 0.0 0.0 1.0)) "PlaySfx3D degrades raw"
+            // The four it realizes faithfully.
+            Expect.isFalse (HostAudio.requiresEngine (CoreAudio.playSfx (SoundId "s") 0.5)) "PlaySfx plays raw"
+            Expect.isFalse (HostAudio.requiresEngine (CoreAudio.playMusic (TrackId "m") true)) "PlayMusic plays raw"
+            Expect.isFalse (HostAudio.requiresEngine CoreAudio.stopMusic) "StopMusic plays raw"
+            Expect.isFalse (HostAudio.requiresEngine (CoreAudio.setMasterVolume 0.5)) "SetMasterVolume is honoured raw"
+        }
+
+        // Sequenced: it swaps the process-wide stderr writer, so it must not race a parallel test.
+        // The warning latch is per-process and this is the ONLY test in this suite that plays an
+        // effect requiring the engine, so the first trip of the latch is observed here.
+        testSequenced (
+            test "Audio.play names the silent drop once, and still plays the batch (#27)" {
+                let fake = new RecordingBackend()
+                let effects = [ CoreAudio.setBusVolume Music 0.25; CoreAudio.playSfx (SoundId "s") 1.0 ]
+
+                let original = System.Console.Error
+                use captured = new System.IO.StringWriter()
+                System.Console.SetError captured
+                try
+                    HostAudio.play (fake :> IAudioBackend) effects
+                    HostAudio.play (fake :> IAudioBackend) effects
+                finally
+                    System.Console.SetError original
+
+                let text = captured.ToString()
+                let occurrences =
+                    text.Split([| "Audio.play drives the backend directly" |], System.StringSplitOptions.None).Length - 1
+
+                // The drop is no longer silent...
+                Expect.stringContains text "SetBusVolume" "the diagnostic names the effect that was dropped"
+                Expect.stringContains text "Engine.createSink" "the diagnostic names the surface that realizes it"
+                // ...but it is not per-frame spam either: a dragged slider emits one of these a frame.
+                Expect.equal occurrences 1 "warned once per process, not once per batch"
+                // And the diagnostic is all that changed: playback is untouched (FR-006/SB-008).
+                Expect.equal fake.Calls (effects @ effects) "every effect still reaches the backend in dispatch order"
+            })
+
         test "Null backend records evidence identical to Core.Audio.interpret (FR-002)" {
             let effects =
                 [ CoreAudio.playSfx (SoundId "a") 9.0 // out of range -> normalized

@@ -123,8 +123,24 @@ module VoicePool =
 [<RequireQualifiedAccess>]
 module Audio =
 
-    /// Fold a per-frame batch of requests through the backend in dispatch order. The product's
-    /// `update` is unchanged: it emits AudioEffect values; this plays them.
+    /// Public contract function (#27). True for exactly the effects a RAW backend structurally cannot
+    /// realize — `SetBusVolume` and `Duck` (no mixer and no clock on this path, so they are dropped)
+    /// and `PlaySfx3D` (no listener to resolve the position against, so it degrades to
+    /// non-positional). Pure and total.
+    ///
+    /// These are not errors: they are the effects that need `FS.GG.Audio.Engine` to mean anything.
+    /// Driven by the Engine they never reach a backend as-is, so this predicate describes precisely
+    /// what the raw path loses.
+    val requiresEngine: effect: AudioEffect -> bool
+
+    /// RAW drive. Fold a per-frame batch of requests through the backend in dispatch order. The
+    /// product's `update` is unchanged: it emits AudioEffect values; this plays them.
+    ///
+    /// There is NO mixing here: an effect satisfying `requiresEngine` is discarded or degraded rather
+    /// than realized (#27), so a volume slider built on this sink does nothing. The first batch that
+    /// carries such an effect logs one diagnostic to stderr naming the surface that does realize it —
+    /// `FS.GG.Audio.Engine`'s `Engine.createSink`, an `AudioEffect list -> unit` of this exact shape.
+    /// Keep `play` for deliberate fire-and-forget playback.
     val play: backend: IAudioBackend -> effects: AudioEffect list -> unit
 
 /// Public contract module. The deterministic, headless record-only backend — the default and

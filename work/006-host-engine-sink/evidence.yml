@@ -1,0 +1,293 @@
+schemaVersion: 1
+workId: 006-host-engine-sink
+stage: evidence
+status: evidenceReady
+sourceSpec: work/006-host-engine-sink/spec.md
+sourceClarifications: work/006-host-engine-sink/clarifications.md
+sourceChecklist: work/006-host-engine-sink/checklist.md
+sourcePlan: work/006-host-engine-sink/plan.md
+sourceTasks: work/006-host-engine-sink/tasks.yml
+sourceAnalysis: readiness/006-host-engine-sink/analysis.json
+sourceSnapshots:
+  - label: analysis
+    path: readiness/006-host-engine-sink/analysis.json
+    digest: 0e794284118f4c9ff05e24ace7fb7b63539a905fc1693e44c0abd304a4a9d044
+    schemaVersion: 1
+  - label: checklist
+    path: work/006-host-engine-sink/checklist.md
+    digest: 04898a87a1fea067bd6d55a779937f90ac9cfbde7902de7b158fbf2dc0f6c9b9
+    schemaVersion: 1
+  - label: clarifications
+    path: work/006-host-engine-sink/clarifications.md
+    digest: bf51fa4f2e317193b091ee4948d1dcfff0aad0291d8d7eac7a2911106b728ffb
+    schemaVersion: 1
+  - label: plan
+    path: work/006-host-engine-sink/plan.md
+    digest: 25daec579ffe1d84d33f8f38117fed72c854e129cc66328bbcbfbf9f701b933b
+    schemaVersion: 1
+  - label: spec
+    path: work/006-host-engine-sink/spec.md
+    digest: a7f677aaf5d5fd099c7d705a1327e1c2dc5d6d988ba7eaa497436e8d256e9944
+    schemaVersion: 1
+  - label: tasks
+    path: work/006-host-engine-sink/tasks.yml
+    digest: 8b5b0b0cf8db7e05a1ecd1fb3a8c4ce264dddecdacd161506589049cdd35987c
+    schemaVersion: 1
+evidence:
+  - id: EV001
+    kind: verification
+    subject:
+      type: task
+      id: T001
+    taskRefs: [T001]
+    requirementRefs: [FR-001]
+    acceptanceScenarioRefs: [AC-001]
+    clarificationDecisionRefs: []
+    checklistResultRefs: []
+    planDecisionRefs: [PD-001]
+    obligationRefs: [EV001]
+    artifacts: [src/FS.GG.Audio.Engine/Engine.fs, src/FS.GG.Audio.Engine/Engine.fsi, tests/FS.GG.Audio.Engine.Tests/EngineTests.fs]
+    sourceRefs: []
+    result: pass
+    synthetic: false
+    notes: ["Engine.createSink returns an AudioEffect list -> unit that steps an owned Engine.T. The test drives the SAME batch [setBusVolume Sfx 0.5; playSfx s 1.0] through both same-typed sinks: the raw Host.Audio.play path realizes PlaySfx(s, 1.0) at full gain with SetBusVolume discarded, while the sink folds the bus gain in and realizes the voice at 0.5. That contrast IS issue #27."]
+  - id: EV002
+    kind: verification
+    subject:
+      type: task
+      id: T002
+    taskRefs: [T002]
+    requirementRefs: [FR-002]
+    acceptanceScenarioRefs: [AC-002]
+    clarificationDecisionRefs: []
+    checklistResultRefs: []
+    planDecisionRefs: [PD-002]
+    obligationRefs: [EV002]
+    artifacts: [src/FS.GG.Audio.Engine/Engine.fs, tests/FS.GG.Audio.Engine.Tests/EngineTests.fs]
+    sourceRefs: []
+    result: pass
+    synthetic: false
+    notes: ["A sink closes over ONE long-lived Engine.T: a bus set on one call still attenuates a sound played on a later call (asserted across two sink invocations). Engine.createSinkOver takes a caller-owned engine, so fadeBus/crossFade/setListener — engine calls, not effects — stay reachable; a fade installed via fadeBus is shown advancing as the sink is driven."]
+  - id: EV003
+    kind: verification
+    subject:
+      type: task
+      id: T003
+    taskRefs: [T003]
+    requirementRefs: [FR-003]
+    acceptanceScenarioRefs: [AC-003]
+    clarificationDecisionRefs: []
+    checklistResultRefs: []
+    planDecisionRefs: [PD-003]
+    obligationRefs: [EV003]
+    artifacts: [src/FS.GG.Audio.Engine/Engine.fs, tests/FS.GG.Audio.Engine.Tests/EngineTests.fs]
+    sourceRefs: []
+    result: pass
+    synthetic: false
+    notes: ["Engine.createSinkWith advances the engine by exactly the dt its injected clock returns. A 1s/50% Duck is driven to its midpoint (gain 0.5) and back to unity (auto-restored) purely by feeding dt = 0.5 twice — no wall clock, no sleep, so the assertion is deterministic."]
+  - id: EV004
+    kind: verification
+    subject:
+      type: task
+      id: T004
+    taskRefs: [T004]
+    requirementRefs: [FR-004]
+    acceptanceScenarioRefs: [AC-004]
+    clarificationDecisionRefs: []
+    checklistResultRefs: []
+    planDecisionRefs: [PD-004]
+    obligationRefs: [EV004]
+    artifacts: [src/FS.GG.Audio.Engine/Engine.fs, tests/FS.GG.Audio.Engine.Tests/EngineTests.fs]
+    sourceRefs: []
+    result: pass
+    synthetic: false
+    notes: ["A PlaySfx3D realized through a sink over an IMixingBackend stays positional: the voice reaches the device via IMixingBackend.PlayAt with pan = +1.0 (hard right) and inverse-distance gain 1/3 at 3x the reference distance. The raw path would have degraded the same effect to a non-positional voice."]
+  - id: EV005
+    kind: verification
+    subject:
+      type: task
+      id: T005
+    taskRefs: [T005]
+    requirementRefs: [FR-005]
+    acceptanceScenarioRefs: [AC-005]
+    clarificationDecisionRefs: []
+    checklistResultRefs: []
+    planDecisionRefs: [PD-005]
+    obligationRefs: [EV005]
+    artifacts: [src/FS.GG.Audio.Host/Host.fs, src/FS.GG.Audio.Host/Host.fsi, tests/FS.GG.Audio.Host.Tests/HostTests.fs]
+    sourceRefs: []
+    result: pass
+    synthetic: false
+    notes: ["Audio.requiresEngine is pure and total, and the test pins it over the whole AudioEffect vocabulary: true for SetBusVolume, Duck and PlaySfx3D; false for PlaySfx, PlayMusic, StopMusic and SetMasterVolume. The implementation matches exhaustively, so a new effect case cannot be added without classifying it."]
+  - id: EV006
+    kind: verification
+    subject:
+      type: task
+      id: T006
+    taskRefs: [T006]
+    requirementRefs: [FR-006]
+    acceptanceScenarioRefs: [AC-006]
+    clarificationDecisionRefs: []
+    checklistResultRefs: []
+    planDecisionRefs: [PD-006]
+    obligationRefs: [EV006]
+    artifacts: [src/FS.GG.Audio.Host/Host.fs, tests/FS.GG.Audio.Host.Tests/HostTests.fs]
+    sourceRefs: []
+    result: pass
+    synthetic: false
+    notes: ["Host.Audio.play emits the diagnostic on the first batch carrying a requiresEngine effect. The test captures stderr around two consecutive plays and asserts: the text names the dropped effect (SetBusVolume) and the surface that realizes it (Engine.createSink); it appears exactly ONCE across both calls (a dragged slider emits such a batch every frame, so a per-batch warning would be spam); and the recording backend still received both batches in dispatch order — playback is unchanged, only the silence was."]
+  - id: EV007
+    kind: verification
+    subject:
+      type: task
+      id: T007
+    taskRefs: [T007]
+    requirementRefs: [FR-007]
+    acceptanceScenarioRefs: [AC-007]
+    clarificationDecisionRefs: []
+    checklistResultRefs: []
+    planDecisionRefs: [PD-007]
+    obligationRefs: [EV007]
+    artifacts: [tests/FS.GG.Audio.Engine.Tests/EngineTests.fs, tests/FS.GG.Audio.Host.Tests/HostTests.fs]
+    sourceRefs: []
+    result: pass
+    synthetic: false
+    notes: ["Full headless suite green with no audio device: 55/55 (Core 10, Host 20, Engine 16, Elmish 9), up from 48 — 7 new tests covering the sink, the injected clock, the 3D path, requiresEngine and the one-time diagnostic. Backends are recording fakes; the diagnostic test is testSequenced because it swaps the process-wide stderr writer."]
+  - id: EV008
+    kind: review
+    subject:
+      type: task
+      id: T008
+    taskRefs: [T008]
+    requirementRefs: [FR-008]
+    acceptanceScenarioRefs: [AC-008]
+    clarificationDecisionRefs: []
+    checklistResultRefs: []
+    planDecisionRefs: [PD-008]
+    obligationRefs: [EV008]
+    artifacts: [docs/api-surface/FS.GG.Audio.Engine/Engine.fsi, docs/api-surface/FS.GG.Audio.Host/Host.fsi, tests/FS.GG.Audio.Engine.Tests/EngineTests.fs]
+    sourceRefs: []
+    result: pass
+    synthetic: false
+    notes: ["Both committed baselines updated to match their sources. The existing drift test compared only the Engine and Core surfaces, so Host.fsi could drift unnoticed; it now checks FS.GG.Audio.Host too — which is what holds the new requiresEngine/play surface honest."]
+  - id: EV009
+    kind: review
+    subject:
+      type: task
+      id: T009
+    taskRefs: [T009]
+    requirementRefs: []
+    acceptanceScenarioRefs: []
+    clarificationDecisionRefs: [DEC-001]
+    checklistResultRefs: []
+    planDecisionRefs: []
+    obligationRefs: [EV009]
+    artifacts: [src/FS.GG.Audio.Engine/Engine.fsi, work/006-host-engine-sink/clarifications.md]
+    sourceRefs: []
+    result: pass
+    synthetic: false
+    notes: ["DEC-001 realized: the sink ships in FS.GG.Audio.Engine, not in FS.GG.Audio.Host as issue #27 literally requested. FS.GG.Audio.Engine already has a ProjectReference to FS.GG.Audio.Host (its IAudioBackend/IMixingBackend come from there), so an engine-stepping helper inside Host would be a dependency cycle — it cannot compile. The requester's intent is preserved: the documented one-liner mixes by default and Audio.play stays the explicit fire-and-forget opt-out."]
+  - id: EV010
+    kind: verification
+    subject:
+      type: task
+      id: T010
+    taskRefs: [T010]
+    requirementRefs: []
+    acceptanceScenarioRefs: []
+    clarificationDecisionRefs: [DEC-002]
+    checklistResultRefs: []
+    planDecisionRefs: []
+    obligationRefs: [EV010]
+    artifacts: [src/FS.GG.Audio.Engine/Engine.fs, tests/FS.GG.Audio.Engine.Tests/EngineTests.fs]
+    sourceRefs: []
+    result: pass
+    synthetic: false
+    notes: ["DEC-002 realized: a sink owns one Engine.T and a monotonic Stopwatch; dt is the interval between successive calls and the FIRST call advances by 0.0, so a sink built at startup and first driven seconds later cannot instantly complete an envelope installed in between. Named create... precisely because the closure owns mutable state: rebuilt per frame it would carry a fresh engine and mix nothing, which is the original bug wearing a new hat."]
+  - id: EV011
+    kind: verification
+    subject:
+      type: task
+      id: T011
+    taskRefs: [T011]
+    requirementRefs: []
+    acceptanceScenarioRefs: []
+    clarificationDecisionRefs: [DEC-003]
+    checklistResultRefs: []
+    planDecisionRefs: []
+    obligationRefs: [EV011]
+    artifacts: [src/FS.GG.Audio.Host/Host.fs, tests/FS.GG.Audio.Host.Tests/HostTests.fs]
+    sourceRefs: []
+    result: pass
+    synthetic: false
+    notes: ["DEC-003 realized: the diagnostic lives in Host.Audio.play, guarded by the pure public predicate requiresEngine. Engine.step consumes SetBusVolume/Duck/PlaySfx3D itself and never forwards them to IAudioBackend.Play, so the warning fires exactly on the raw wiring and never when the Engine drives — no false positives. It is not in the OpenAL backend (untestable headlessly: CI has no device and falls back to Null) nor in the Null backend (recording those effects as evidence is that backend's contract)."]
+  - id: EV012
+    kind: review
+    subject:
+      type: task
+      id: T012
+    taskRefs: [T012]
+    requirementRefs: []
+    acceptanceScenarioRefs: []
+    clarificationDecisionRefs: []
+    checklistResultRefs: []
+    planDecisionRefs: [PD-001]
+    obligationRefs: [EV012]
+    artifacts: [docs/api-surface/FS.GG.Audio.Engine/Engine.fsi, docs/api-surface/FS.GG.Audio.Host/Host.fsi, src/FS.GG.Audio.Engine/Engine.fsi, src/FS.GG.Audio.Host/Host.fsi]
+    sourceRefs: []
+    result: pass
+    synthetic: false
+    notes: ["PC-001 contract surface: the additions are declared in the .fsi files — Engine.createSink/createSinkOver/createSinkWith and Host Audio.requiresEngine — and both docs/api-surface baselines match their sources (drift test green). Purely additive: no existing signature changed."]
+  - id: EV013
+    kind: verification
+    subject:
+      type: task
+      id: T013
+    taskRefs: [T013]
+    requirementRefs: []
+    acceptanceScenarioRefs: []
+    clarificationDecisionRefs: []
+    checklistResultRefs: []
+    planDecisionRefs: [PD-001]
+    obligationRefs: [EV013]
+    artifacts: [tests/FS.GG.Audio.Engine.Tests/EngineTests.fs, tests/FS.GG.Audio.Host.Tests/HostTests.fs]
+    sourceRefs: []
+    result: pass
+    synthetic: false
+    notes: ["VO-001 met: dotnet build clean and dotnet test green at 55/55 headless. Beyond the suite, the #27 scenario was driven end-to-end through the real shipped public API (dotnet fsi against the built assemblies, with a printing IMixingBackend standing in for the device): the raw sink plays the click at gain 1.00 with the slider discarded, and the createSink sink plays it at 0.25. The user-visible bug is reproduced and fixed, not merely unit-tested."]
+  - id: EV014
+    kind: note
+    subject:
+      type: task
+      id: T014
+    taskRefs: [T014]
+    requirementRefs: []
+    acceptanceScenarioRefs: []
+    clarificationDecisionRefs: []
+    checklistResultRefs: []
+    planDecisionRefs: []
+    obligationRefs: [EV014]
+    artifacts: [work/006-host-engine-sink/plan.md]
+    sourceRefs: []
+    result: pass
+    synthetic: false
+    notes: ["PM-001: additive public surface, no breaking change and no schema migration. No new package or project reference is added — FS.GG.Audio.Engine already referenced FS.GG.Audio.Host — so no packages.lock.json changes. A host-level product that wants mixing now also references the FS.GG.Audio.Engine package, which it needs anyway, since Engine.T is the thing that mixes. Host.Audio.play gains a one-time stderr diagnostic: an observable behavior addition, not a playback change."]
+  - id: EV015
+    kind: generated-view
+    subject:
+      type: task
+      id: T015
+    taskRefs: [T015]
+    requirementRefs: []
+    acceptanceScenarioRefs: []
+    clarificationDecisionRefs: []
+    checklistResultRefs: []
+    planDecisionRefs: [PD-001]
+    obligationRefs: [EV015]
+    artifacts: [readiness/006-host-engine-sink/analysis.json]
+    sourceRefs: []
+    result: pass
+    synthetic: false
+    notes: ["GV-001: generated readiness views refreshed against the current authored sources — analyze reported implementationReady with 0 blocking findings, 0 stale sources and 0 generated-view findings."]
+lifecycleNotes:
+  - "Next lifecycle action: verify."
