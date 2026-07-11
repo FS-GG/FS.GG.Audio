@@ -26,13 +26,49 @@ jobs:
       - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '10.0.x'
-      - name: Restore (locked)
+      # The restore must be COLD (FS-GG/.github#429, epic #266 "compare against reality, not against
+      # a record of reality").
+      #
+      # NU1403 ("package content hash validation failed") is raised by comparing the lock file against
+      # the package ALREADY PRESENT in the global-packages folder. If that copy is stale — pre-seeded
+      # in the runner image, or left by an earlier restore — then --locked-mode validates one record
+      # against another and never contacts the feed. The gate then fails in BOTH directions, which is
+      # exactly what FSharp.Core 10.1.301 did after it was re-published:
+      #
+      #   * green on main with a lock file NO FRESH CLONE COULD RESTORE   (fails open), and
+      #   * red on a correct, freshly-generated lock file                 (fails closed).
+      #
+      # Restoring into an empty NUGET_PACKAGES forces a real download, so the hash the gate checks is
+      # the hash the feed actually serves. It is exported to GITHUB_ENV so the later --no-restore
+      # build / test / pack steps resolve from that same folder.
+      #
+      # NOTE: NUGET_PACKAGES relocates the global-packages folder but NOT the HTTP cache, which will
+      # happily replay stale .nupkg bytes. Clearing it is load-bearing, not belt-and-braces.
+      - name: Restore (locked, cold)
         run: |
           set -euo pipefail
-          if ! dotnet restore FS.GG.Audio.slnx --locked-mode; then
-            echo "::error::locked restore failed — the resolved graph does not match the committed packages.lock.json. If intentional, run: dotnet restore FS.GG.Audio.slnx --force-evaluate  and commit the lockfiles."
-            exit 1
+
+          NUGET_PACKAGES="$(mktemp -d)"
+          export NUGET_PACKAGES
+          echo "NUGET_PACKAGES=$NUGET_PACKAGES" >> "$GITHUB_ENV"
+          dotnet nuget locals http-cache --clear
+
+          if dotnet restore FS.GG.Audio.slnx --locked-mode; then
+            exit 0
           fi
+
+          # The restore failed against the feed. Don't leave the author guessing which of three
+          # plausible hashes to paste: the lock's contentHash, the .nupkg's own SHA512, and the
+          # catalog packageHash are THREE DIFFERENT values, and only the first is ever validated.
+          # Regenerate from the feed and print exactly what to commit.
+          echo "::group::what a cold restore from the feed actually resolves (commit this)"
+          dotnet restore FS.GG.Audio.slnx --force-evaluate >/dev/null 2>&1 || true
+          git --no-pager diff --stat -- '**/packages.lock.json' || true
+          git --no-pager diff -- '**/packages.lock.json' || true
+          echo "::endgroup::"
+
+          echo "::error::locked restore failed — the committed packages.lock.json does not match what the feed serves (or a version was substituted, NU1603). The diff above is what a cold restore resolves; regenerate with: dotnet restore FS.GG.Audio.slnx --force-evaluate  and commit the updated lockfiles. Let --force-evaluate write the hash — never hand-copy one, and note the lock's contentHash is NOT the .nupkg's SHA512."
+          exit 1
       - name: Build (Debug, --no-restore)
         run: dotnet build FS.GG.Audio.slnx -c Debug --no-restore
       - name: Test (full headless suite, --no-restore)
