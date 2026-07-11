@@ -31,8 +31,20 @@ jobs:
   # The shared gate resolves each project's own effective <Version> rather than this repo's central
   # <FsGgAudioVersion>, because that is the only rule true of all three receivers. For Audio the two
   # agree exactly: every project sets <Version>$(FsGgAudioVersion)</Version>.
+  #
+  # min-ranges is this repo's DECLARED subject count, not the default floor of 1. The default only
+  # catches a drop to zero, and the way this check degrades is not to zero: a range is matched by
+  # looking its dependency up among the package ids this repo's projects produce, so if that
+  # resolution drifts — a renamed <PackageId>, a lock that keys its entries differently — the
+  # unmatched ranges are silently SKIPPED rather than failed. 16 of 17 could vanish and a floor of 1
+  # would still print "ok". Declaring 17 makes that a red gate. It cannot cry wolf on growth: adding
+  # a project, a reference or a TFM only raises the count, and the floor trips only on a genuine
+  # reduction — which is a decision someone should have to make explicitly. (Epic #266, and #416's
+  # silent-no-op family: "nothing to check" and "checked, and it is fine" must not share an exit code.)
   lock-ranges:
     uses: FS-GG/.github/.github/workflows/lock-range-coherence.yml@main
+    with:
+      min-ranges: 17
 
   build-test:
     name: Build + test (locked restore, net10.0, headless)
