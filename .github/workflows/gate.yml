@@ -46,9 +46,15 @@ jobs:
         run: |
           set -euo pipefail
 
-          truth="$(grep -oP '(?<=<FsGgAudioVersion>)[^<]+' Directory.Packages.props || true)"
+          truth="$(grep -oP '(?<=<FsGgAudioVersion>)[^<]+' Directory.Packages.props | head -n1 || true)"
           [ -n "$truth" ] || { echo "::error::<FsGgAudioVersion> not found in Directory.Packages.props — cannot establish the version-of-truth to check the locks against."; exit 1; }
-          want="[$truth, )"
+
+          # Compare against the version NuGet WRITES, not the one we typed. SemVer2 build metadata is
+          # not part of NuGet version identity, so it is dropped from a range: <FsGgAudioVersion> of
+          # `0.2.0+ci` lands in the lock as `[0.2.0, )` — the same normalization the pack step below
+          # already has to work around when it globs the .nupkg name. Comparing the raw string would
+          # red the gate on a perfectly correct +ci bump, and a guard that cries wolf gets deleted.
+          want="[${truth%%+*}, )"
           echo "version-of-truth: $truth  ->  every FS.GG.Audio.* project range must read '$want'"
 
           locks="$(git ls-files '*packages.lock.json')"
