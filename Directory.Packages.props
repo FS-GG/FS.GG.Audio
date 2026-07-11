@@ -4,7 +4,7 @@
     <!-- DEC-003 (work item 001-audio-core): the FS.GG.Audio.* packages release on their OWN
          version axis, independent of $(FsGgUiVersion) and $(FsGgGameVersion) — mirroring how
          FS.GG.Game.Core is pinned by $(FsGgGameVersion). Bottom-layer, BCL-only. -->
-    <FsGgAudioVersion>0.1.0</FsGgAudioVersion>
+    <FsGgAudioVersion>0.2.0</FsGgAudioVersion>
   </PropertyGroup>
   <ItemGroup>
     <!-- FSharp.Core: the org common pin (Rendering/SDD/Governance all pin 10.1.301). FS.GG.Audio.Core
