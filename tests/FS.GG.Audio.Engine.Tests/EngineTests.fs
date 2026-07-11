@@ -164,6 +164,87 @@ let tests =
             Expect.isTrue true "step completed without an exception escaping into game code"
         }
 
+        // --- #27: the sink — a mixing `AudioEffect list -> unit`, the shape a host product wires. ---
+
+        test "createSink mixes where the raw Host.Audio.play sink of the same type drops (#27)" {
+            // The bug, stated as a test: the SAME batch through the two same-typed sinks. This is a
+            // volume slider (SetBusVolume) followed by a sound.
+            let batch = [ CoreAudio.setBusVolume Sfx 0.5; CoreAudio.playSfx (SoundId "s") 1.0 ]
+
+            let raw = mixing ()
+            Audio.play (raw :> IAudioBackend) batch
+            Expect.equal
+                raw.Plays
+                [ SetBusVolume(Sfx, 0.5); PlaySfx(SoundId "s", 1.0) ]
+                "raw: SetBusVolume reaches a backend that discards it, and the sfx plays at FULL gain — the slider did nothing"
+
+            let mixed = mixing ()
+            let sink = Engine.createSink (mixed :> IAudioBackend)
+            sink batch
+            Expect.isEmpty
+                (mixed.Plays |> List.filter (fun e -> e = SetBusVolume(Sfx, 0.5)))
+                "mixed: the engine consumes SetBusVolume rather than forwarding it to the backend"
+            let (sound, gain, _) = List.exactlyOne mixed.PlayAts
+            Expect.equal sound (SoundId "s") "the sfx is realized"
+            Expect.floatClose acc gain 0.5 "mixed: the bus gain is folded into the voice — the slider WORKS"
+        }
+
+        test "a sink advances one long-lived engine across frames (#27)" {
+            // The footgun the `create` naming guards against: state must persist across calls, so a
+            // bus set on one frame still attenuates a sound played on a later one.
+            let backend = mixing ()
+            let sink = Engine.createSink (backend :> IAudioBackend)
+            sink [ CoreAudio.setBusVolume Sfx 0.25 ]
+            sink [ CoreAudio.playSfx (SoundId "s") 1.0 ]
+            let (_, gain, _) = List.exactlyOne backend.PlayAts
+            Expect.floatClose acc gain 0.25 "the bus gain set on an earlier frame still applies"
+        }
+
+        test "createSinkOver keeps the engine reachable, so fades still drive the sink (#27)" {
+            let backend = mixing ()
+            let engine = Engine.create (backend :> IAudioBackend)
+            let sink = Engine.createSinkWith (fun () -> 0.5) engine   // deterministic: 0.5s per call
+            // fadeBus is an engine call, not an effect — createSinkOver/With is what keeps it usable.
+            Engine.fadeBus engine Music 0.0 1.0
+            sink []
+            Expect.floatClose acc (engine.BusGain Music) 0.5 "half-way through a 1s fade after one 0.5s frame"
+            sink []
+            Expect.floatClose acc (engine.BusGain Music) 0.0 "the fade completes as the sink is driven"
+        }
+
+        test "createSinkWith advances the engine by the dt it is given, wall-clock-free (#27)" {
+            // Envelopes must advance and RECOVER on the injected clock alone — no Stopwatch, no sleep.
+            let backend = mixing ()
+            let engine = Engine.create (backend :> IAudioBackend)
+            let mutable dt = 0.0
+            let sink = Engine.createSinkWith (fun () -> dt) engine
+
+            sink [ CoreAudio.duck Music 0.5 1000.0 ]   // a 1s duck, 50% deep
+            Expect.floatClose acc (engine.BusGain Music) 1.0 "the duck starts at unity"
+            dt <- 0.5
+            sink []
+            Expect.floatClose acc (engine.BusGain Music) 0.5 "at the midpoint the duck is at its deepest"
+            dt <- 0.5
+            sink []
+            Expect.floatClose acc (engine.BusGain Music) 1.0 "the duck auto-restores once elapsed"
+        }
+
+        test "a sink keeps a 3D voice positional, where the raw path degrades it (#27)" {
+            let backend = mixing ()
+            let engine = Engine.create (backend :> IAudioBackend)
+            let sink = Engine.createSinkWith (fun () -> 0.0) engine
+            Engine.setListener engine 0.0 0.0 0.0
+            // 3m out on +x — beyond RefDistance (1m), where the inverse-distance model is a no-op —
+            // so this asserts real attenuation rather than the reference distance's unity gain.
+            sink [ CoreAudio.playSfx3D (SoundId "s") 3.0 0.0 0.0 1.0 ]
+            let v = List.exactlyOne engine.LastVoices
+            Expect.isTrue v.Positional "the voice stays positional through the sink"
+            Expect.floatClose acc v.Pan 1.0 "a source on the +x axis pans hard right"
+            Expect.floatClose acc v.EffectiveGain (1.0 / 3.0) "inverse-distance attenuation at 3x the reference distance"
+            // And it reached the device through the spatial seam, not as a flat non-positional play.
+            Expect.equal (List.length backend.PlayAts) 1 "realized through IMixingBackend.PlayAt"
+        }
+
         test "committed .fsi baselines match the sources, no drift (FR-009)" {
             let root = repoRoot ()
             let check pkg name =
@@ -173,5 +254,6 @@ let tests =
                 Expect.equal (File.ReadAllText baseline) (File.ReadAllText src) (sprintf "%s surface matches baseline" pkg)
             check "FS.GG.Audio.Engine" "Engine.fsi"
             check "FS.GG.Audio.Core" "Audio.fsi"        // additive Core surface bump
+            check "FS.GG.Audio.Host" "Host.fsi"         // the raw-path diagnostic surface (#27)
         }
     ]

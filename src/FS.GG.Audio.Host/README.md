@@ -34,8 +34,38 @@ let resolver =
 use device = OpenAlBackend.create resolver // falls back to Null if no device
 ```
 
+## Which sink? `Audio.play` does not mix
+
+A product wires a per-frame sink of type `AudioEffect list -> unit`. There are two, and the
+difference is load-bearing:
+
+```fsharp
+// RAW — plays straight at the backend. No mixing.
+let audioSink = Audio.play backend
+
+// MIXING — steps an owned FS.GG.Audio.Engine. Bus volume, ducking, fades and 3D all apply.
+let audioSink = Engine.createSink backend
+```
+
+`Audio.play` is a thin drive over `IAudioBackend`, and a backend has no mixer and no clock. So on the
+raw path `SetBusVolume` and `Duck` are **discarded** and `PlaySfx3D` plays **non-positional** — which
+means a settings screen's volume slider, wired this way, does nothing at all: the effect is a
+well-formed value, the sink accepts it, and no sound changes ([#27]). `Audio.requiresEngine` is the
+predicate for exactly those effects, and the first batch carrying one logs a diagnostic saying so.
+
+Reach for `Audio.play` when you want deliberate fire-and-forget playback; reach for
+[`FS.GG.Audio.Engine`](https://www.nuget.org/packages/FS.GG.Audio.Engine)'s `Engine.createSink`
+whenever bus volume, ducking, fades or 3D matter. (Elmish products have the same choice between
+`Audio.Cmd.ofEffects` and `Audio.Cmd.ofEngine`.)
+
+[#27]: https://github.com/FS-GG/FS.GG.Audio/issues/27
+
 ## Surface
 
+- `Audio.play` — the raw imperative drive: folds a batch through the backend in dispatch order. No
+  mixing (see above).
+- `Audio.requiresEngine` — pure predicate, true for exactly the effects the raw path cannot realize
+  (`SetBusVolume`, `Duck`, `PlaySfx3D`).
 - `IAudioBackend` — `Play: AudioEffect -> unit`, plus `IDisposable`. Never throws; a backend that
   cannot act degrades to a no-op.
 - `IMixingBackend` — optional extension (`SetBusGain`, `SetListener`, `PlayAt`) that

@@ -59,12 +59,88 @@ module Spatial =
     /// distance model from attenuating a gain `FS.GG.Audio.Engine` has already attenuated.
     val panToPosition: pan: float -> float * float * float
 
+/// Public contract module. A device-free memo of uploaded buffer handles keyed by a product id
+/// (`SoundId`/`TrackId`), so an asset is decoded and uploaded once rather than on every play (#20).
+/// It holds only `uint` handles and a create-callback — no device, no OpenAL types — so it is
+/// exercised headless.
+[<RequireQualifiedAccess>]
+module BufferCache =
+
+    /// A memo of buffer handles keyed by `'k`.
+    [<Sealed>]
+    type T<'k when 'k: equality> =
+        /// A fresh, empty cache.
+        new: unit -> T<'k>
+        /// The cached handle for `key`, created once via `create` on first miss. A `None` from
+        /// `create` (unresolved / unparseable asset) is NOT cached, so a later successful resolve of
+        /// the same id can still populate the entry.
+        member GetOrAdd: key: 'k * create: (unit -> uint option) -> uint option
+        /// Number of distinct handles held (one per successfully uploaded id).
+        member Count: int
+        /// Every cached handle, for deletion when the backend is disposed.
+        member Handles: uint[]
+
+/// Public contract module. A device-free, bounded pool of one-shot voice handles that reclaims
+/// finished voices instead of leaking them (#20): the OpenAL backend used to allocate a source per
+/// one-shot and never delete it, so a long session exhausted the source ceiling and `Play` then
+/// failed silently. The pool takes its device operations as callbacks, so its reclaim/steal logic
+/// runs headless behind counting fakes.
+[<RequireQualifiedAccess>]
+module VoicePool =
+
+    /// The device operations a pool drives, named so the two `uint -> unit` handle operations cannot
+    /// be transposed. In the OpenAL backend: `GenSource`, a `SourceState = Stopped` test,
+    /// `SourceStop`, and `DeleteSource`.
+    type Ops =
+        { /// Allocate a fresh source handle.
+          Gen: unit -> uint
+          /// True once a handed-out voice has finished (is reclaimable).
+          IsStopped: uint -> bool
+          /// Stop a still-sounding voice so its handle can be reused or deleted.
+          Stop: uint -> unit
+          /// Release a handle for good.
+          Delete: uint -> unit }
+
+    /// A bounded pool of one-shot voice handles.
+    [<Sealed>]
+    type T =
+        /// A pool driven by `ops`, holding at most `ceiling` live handles before it steals the
+        /// oldest still-sounding voice.
+        new: ops: Ops * ceiling: int -> T
+        /// A source handle ready to be configured and played: reclaims finished voices, reuses a
+        /// free handle when one exists, grows up to `ceiling`, and past it steals the oldest voice.
+        member Acquire: unit -> uint
+        /// Voices handed out and presumed still sounding.
+        member ActiveCount: int
+        /// Reclaimed handles available for reuse.
+        member FreeCount: int
+        /// True once the ceiling has forced at least one oldest-voice steal.
+        member HasStolen: bool
+        /// Stop and delete every handle the pool owns.
+        member DisposeAll: unit -> unit
+
 /// Public contract module. The imperative drive (FR-006).
 [<RequireQualifiedAccess>]
 module Audio =
 
-    /// Fold a per-frame batch of requests through the backend in dispatch order. The product's
-    /// `update` is unchanged: it emits AudioEffect values; this plays them.
+    /// Public contract function (#27). True for exactly the effects a RAW backend structurally cannot
+    /// realize — `SetBusVolume` and `Duck` (no mixer and no clock on this path, so they are dropped)
+    /// and `PlaySfx3D` (no listener to resolve the position against, so it degrades to
+    /// non-positional). Pure and total.
+    ///
+    /// These are not errors: they are the effects that need `FS.GG.Audio.Engine` to mean anything.
+    /// Driven by the Engine they never reach a backend as-is, so this predicate describes precisely
+    /// what the raw path loses.
+    val requiresEngine: effect: AudioEffect -> bool
+
+    /// RAW drive. Fold a per-frame batch of requests through the backend in dispatch order. The
+    /// product's `update` is unchanged: it emits AudioEffect values; this plays them.
+    ///
+    /// There is NO mixing here: an effect satisfying `requiresEngine` is discarded or degraded rather
+    /// than realized (#27), so a volume slider built on this sink does nothing. The first batch that
+    /// carries such an effect logs one diagnostic to stderr naming the surface that does realize it —
+    /// `FS.GG.Audio.Engine`'s `Engine.createSink`, an `AudioEffect list -> unit` of this exact shape.
+    /// Keep `play` for deliberate fire-and-forget playback.
     val play: backend: IAudioBackend -> effects: AudioEffect list -> unit
 
 /// Public contract module. The deterministic, headless record-only backend — the default and

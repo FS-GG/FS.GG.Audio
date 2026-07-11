@@ -203,7 +203,34 @@ module VoicePool =
 [<RequireQualifiedAccess>]
 module Audio =
 
+    // The effects a raw backend structurally CANNOT realize (#27). SetBusVolume and Duck are
+    // envelopes over a mix, and this path has neither a mixer nor a clock, so they are discarded;
+    // PlaySfx3D carries a world position with no listener to resolve it against, so it degrades to a
+    // non-positional voice. FS.GG.Audio.Engine consumes all three itself (it pushes realized gains
+    // through IMixingBackend.SetBusGain/PlayAt and never forwards these to Play), so this is true
+    // only of effects that reached a backend directly.
+    let requiresEngine (effect: AudioEffect) : bool =
+        match effect with
+        | SetBusVolume _
+        | Duck _
+        | PlaySfx3D _ -> true
+        | PlaySfx _
+        | PlayMusic _
+        | StopMusic
+        | SetMasterVolume _ -> false
+
+    // Hidden by Host.fsi. Once per process, not per batch: a slider drag emits a dropped
+    // SetBusVolume every frame, and a per-batch warning would bury the message it is delivering.
+    let mutable private warnedRawDrop = false
+
     let play (backend: IAudioBackend) (effects: AudioEffect list) : unit =
+        // The drop used to be silent, which is the whole of #27: the effect is a well-formed value,
+        // the sink accepts it, and nothing happens — no error, no diagnostic, no type error. Say so
+        // once, and name the surface that does realize it.
+        if not warnedRawDrop && List.exists requiresEngine effects then
+            warnedRawDrop <- true
+            eprintfn
+                "FS.GG.Audio.Host: Audio.play drives the backend directly and cannot realize SetBusVolume/Duck (dropped) or PlaySfx3D (played non-positional) — a volume slider wired this way does nothing. Build the sink with FS.GG.Audio.Engine's Engine.createSink, which mixes; keep Audio.play for deliberate fire-and-forget playback."
         for effect in effects do
             backend.Play effect
 

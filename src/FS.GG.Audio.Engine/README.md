@@ -39,8 +39,37 @@ Engine.crossFade engine Music Ambient 2.0 // equal-power, constant summed power
 engine.LastVoices // the voices realized on the most recent step
 ```
 
+## The sink: mixing by default
+
+A host-level product wires a per-frame sink of type `AudioEffect list -> unit`. Building it with
+`FS.GG.Audio.Host`'s `Audio.play backend` plays **straight at the device**: no mixer, no clock, so
+`SetBusVolume`/`Duck` are silently discarded and `PlaySfx3D` plays non-positional — a volume slider
+wired that way does nothing ([#27]). `Engine.createSink` returns a sink of that same type which steps
+an owned engine instead, so the mixing semantics apply:
+
+```fsharp
+use backend = OpenAlBackend.create resolver
+let audioSink = Engine.createSink backend   // AudioEffect list -> unit, and it MIXES
+
+audioSink [ Audio.setBusVolume Sfx 0.25     // the slider now actually attenuates...
+            Audio.playSfx (SoundId "click") 1.0 ]   // ...this, to 0.25
+```
+
+Create the sink **once** and reuse it: it owns the engine and the clock, so one rebuilt per frame
+would start from a fresh mix every frame and no envelope would ever advance. `dt` is the interval
+between successive calls, so drive it once a frame and fades and ducks progress on their own.
+
+- `Engine.createSinkOver engine` — same, over an engine you own, so `fadeBus`/`crossFade`/
+  `setListener` (which are engine calls, not effects) stay reachable.
+- `Engine.createSinkWith dt engine` — you supply `dt`. Use it when the product already owns a frame
+  clock, and in tests, where a wall clock is not deterministic.
+
+[#27]: https://github.com/FS-GG/FS.GG.Audio/issues/27
+
 ## Surface
 
+- `Engine.createSink` / `createSinkOver` / `createSinkWith` — build a mixing
+  `AudioEffect list -> unit` sink (see above).
 - `Engine.create` / `createWith` — build over an `IAudioBackend`; buses start at unity gain.
   `createWith` takes an explicit `SpatialConfig` (`RefDistance`, `Rolloff`, `MaxDistance`);
   `Engine.defaultSpatial` is `1`, `1`, uncapped.

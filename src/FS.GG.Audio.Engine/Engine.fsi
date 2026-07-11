@@ -68,3 +68,34 @@ module Engine =
 
     /// Set the listener position (metres) used to resolve subsequent 3D voices (FR-005).
     val setListener: engine: T -> x: float -> y: float -> z: float -> unit
+
+    /// Create a MIXING sink over `backend` (#27): an `AudioEffect list -> unit` — the same shape a
+    /// host-level product already wires — that owns an `Engine.T` and a monotonic clock and realizes
+    /// each batch through `Engine.step`. Bus volume, master scaling, fades, ducking and 3D therefore
+    /// apply, where the raw `Host.Audio.play backend` sink of the same type silently drops
+    /// `SetBusVolume`/`Duck` and plays `PlaySfx3D` non-positional.
+    ///
+    /// This is the sink to reach for by default; keep `Host.Audio.play` for deliberate
+    /// fire-and-forget playback. `dt` is the wall-clock interval between successive calls, so drive
+    /// the sink once per frame and time-based envelopes advance on their own; the first call
+    /// advances by `0.0`.
+    ///
+    /// Create it ONCE and reuse the returned function. A sink rebuilt every frame owns a fresh engine
+    /// every frame, so no envelope ever advances and no bus gain persists.
+    ///
+    /// Two reasons to reach past it: it owns its engine privately, so `fadeBus`/`crossFade`/
+    /// `setListener` and the `BusGain`/`LastVoices` observables are out of reach (use
+    /// `createSinkOver`); and because `dt` is real elapsed time, a long stall — a pause, a loading
+    /// screen, a breakpoint — arrives as one large `dt` that completes every in-flight fade and duck
+    /// at once. A product that pauses, or that already owns a frame clock, should drive
+    /// `createSinkWith` and supply its own `dt`.
+    val createSink: backend: IAudioBackend -> (AudioEffect list -> unit)
+
+    /// As `createSink`, but over a caller-owned engine — so `fadeBus`/`crossFade`/`setListener`, which
+    /// are engine calls rather than effects, stay reachable alongside the sink.
+    val createSinkOver: engine: T -> (AudioEffect list -> unit)
+
+    /// As `createSinkOver`, but the caller supplies `dt` (seconds to advance on each call) instead of
+    /// a wall clock. Use it when the product already owns a frame clock, and in tests, where a wall
+    /// clock is not deterministic.
+    val createSinkWith: dt: (unit -> float) -> engine: T -> (AudioEffect list -> unit)
