@@ -131,38 +131,97 @@ let tests =
             Expect.equal nb.Evidence (CoreAudio.interpret effects) "Null backend evidence == interpret"
         }
 
-        test "Null backend opens no device and never throws (FR-002)" {
+        test "Null backend opens no device, never throws, and reports itself REQUESTED (FR-002, #34)" {
             let nb = NullBackend.create () :> IAudioBackend
             HostAudio.play nb [ CoreAudio.stopMusic; CoreAudio.playSfx (SoundId "x") 0.2 ]
             nb.Dispose()
-            Expect.isTrue true "no exception thrown on a machine with no device"
+            // `Expect.isTrue true` stood here — a tautology that passed whatever happened, asserting
+            // only "no exception" by side effect. The real content is that a DELIBERATE Null is
+            // distinguishable from a SUBSTITUTED one (#34): both are silent, and only one is a bug.
+            Expect.equal
+                (Backend.kindOf nb)
+                (BackendKind.RecordOnly Silence.Requested)
+                "a Null the product asked for reports Requested — never DeviceUnavailable"
+            Expect.isFalse (Backend.isDeviceBacked nb) "record-only: nothing given to it is audible"
         }
 
-        test "OpenAlBackend.create degrades to a usable backend with no device (FR-004)" {
-            // Headless/CI has no OpenAL device: create MUST NOT throw and MUST return a usable
-            // IAudioBackend (the Null fallback); playing through it is a safe no-op.
+        // The guard must not wave through a backend it did not build. `kindOf` matches BOTH known
+        // backends positively; a `| _ -> DeviceBacked` default would report every record-only fake in
+        // this repo (and every product's own stub) as audible, so a suite writing the recommended
+        // `if isDeviceBacked then assert else skip` against its own fake would assert against a
+        // recorder and go green because nothing played — #34, reintroduced by #34's own fix.
+        test "an IAudioBackend this library did not build is Unknown, never DeviceBacked (#34)" {
+            let fake = new RecordingBackend() :> IAudioBackend
+            Expect.equal (Backend.kindOf fake) BackendKind.Unknown "a foreign backend is Unknown, not assumed audible"
+            Expect.isFalse
+                (Backend.isDeviceBacked fake)
+                "isDeviceBacked fails CLOSED on a backend it cannot vouch for — guessing true is how a fake passes for a device"
+        }
+
+        // The Null fallback must stay a PLAIN IAudioBackend. FS.GG.Audio.Engine feature-detects
+        // IMixingBackend, so if Null implemented it the Engine would push realized gains at a recorder
+        // instead of taking its non-positional degrade path. Headless-safe — no device required — so
+        // unlike the #11 device test below, this one ALWAYS has a subject and always asserts.
+        test "the Null backend never implements IMixingBackend, so the Engine degrades over it (#11)" {
+            let nb = NullBackend.create () :> IAudioBackend
+            Expect.isFalse (nb :? IMixingBackend) "the Null fallback stays non-mixing"
+        }
+
+        test "OpenAlBackend.create degrades to a Null it MARKS as substituted, and never throws (FR-004, #34)" {
             let resolver =
                 { ResolveSound = (fun _ -> None)
                   ResolveTrack = (fun _ -> None) }
             let backend = OpenAlBackend.create resolver
-            HostAudio.play backend [ CoreAudio.playSfx (SoundId "s") 0.5; CoreAudio.stopMusic ]
-            backend.Dispose()
-            Expect.isTrue true "create degraded without throwing and play was safe"
+            try
+                HostAudio.play backend [ CoreAudio.playSfx (SoundId "s") 0.5; CoreAudio.stopMusic ]
+                // Runs on BOTH kinds of box and asserts something FALSIFIABLE on each — where it used
+                // to `Expect.isTrue true` and assert nothing at all.
+                match Backend.kindOf backend with
+                | BackendKind.DeviceBacked ->
+                    // NOT `Expect.isTrue (isDeviceBacked backend)` — `isDeviceBacked` is *defined* as
+                    // this very match, so asserting it here could not fail under any implementation,
+                    // and the branch would say nothing on a machine that has a device. Assert instead
+                    // what being device-backed is supposed to MEAN: it is not the Null fallback, and it
+                    // spatializes (#11).
+                    Expect.isFalse (backend :? NullBackend.T) "a device opened: this is not the Null fallback"
+                    Expect.isTrue (backend :? IMixingBackend) "a real device backend implements IMixingBackend (#11)"
+                | BackendKind.RecordOnly(Silence.DeviceUnavailable reason) ->
+                    Expect.isFalse
+                        (System.String.IsNullOrWhiteSpace reason)
+                        "the substitution carries the device's own reason, so the silence is explicable"
+                    Expect.isFalse (Backend.isDeviceBacked backend) "a substituted Null is not device-backed"
+                | BackendKind.RecordOnly Silence.Requested ->
+                    // Must be impossible: `create` never REQUESTS a Null, it SUBSTITUTES one. If it ever
+                    // reports Requested, the substitution has lost the fact that it was a substitution —
+                    // #34 exactly — and this is the assertion that catches it.
+                    failtest
+                        "OpenAlBackend.create returned a Null marked Requested — a substitution must never masquerade as a deliberate record-only backend"
+                | BackendKind.Unknown ->
+                    failtest "OpenAlBackend.create returned a backend this library does not recognise as its own"
+            finally
+                backend.Dispose()
         }
 
-        // The bundled OpenAL backend must be an IMixingBackend, because that is the only interface
-        // FS.GG.Audio.Engine spatializes through: a backend that implements IAudioBackend alone
-        // silently drops every pan. Vacuous on headless CI, where create degrades to Null (and Null
-        // must stay a plain IAudioBackend, so the Engine's degrade path is what runs there).
+        // This test was VACUOUS on headless CI, and that was the bug (#34). `create` degrades to Null
+        // where there is no device, so it asserted against a recorder and passed *because* nothing
+        // played — a green tick on a subject that was never constructed. It now SKIPS loudly
+        // (`Ignored`, not `Passed`) when it has nothing to test, which is the honest report.
         test "the OpenAL backend implements IMixingBackend when a device is present (#11)" {
             let resolver =
                 { ResolveSound = (fun _ -> None)
                   ResolveTrack = (fun _ -> None) }
             let backend = OpenAlBackend.create resolver
-            match backend with
-            | :? NullBackend.T -> Expect.isFalse (backend :? IMixingBackend) "the Null fallback stays non-mixing"
-            | _ -> Expect.isTrue (backend :? IMixingBackend) "a real device backend spatializes"
-            backend.Dispose()
+            try
+                match Backend.kindOf backend with
+                | BackendKind.DeviceBacked ->
+                    Expect.isTrue (backend :? IMixingBackend) "a real device backend spatializes (#11)"
+                | kind ->
+                    skiptest (
+                        sprintf
+                            "no audio device here (%A) — OpenAlBackend.create substituted the Null backend, so the real device backend was NEVER CONSTRUCTED and this assertion has no subject. Reported Ignored rather than Passed on purpose (#34)."
+                            kind)
+            finally
+                backend.Dispose()
         }
 
         test "Spatial.panToPosition puts a centred voice in front of the listener (#11)" {

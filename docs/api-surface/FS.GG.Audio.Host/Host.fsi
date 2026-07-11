@@ -38,6 +38,35 @@ type IMixingBackend =
     /// Play a positional one-shot with a pre-resolved effective gain and pan in `[-1, 1]`.
     abstract member PlayAt: sound: SoundId * gain: float * pan: float -> unit
 
+/// Public contract type (#34). WHY a backend makes no sound — and the distinction is the point.
+///
+/// A Null backend the product ASKED for is correct and expected: it is the default, and the test/CI
+/// backend (FR-002). One that `OpenAlBackend.create` SUBSTITUTED, because no device would open, is a
+/// game running silently. At the `IAudioBackend` seam the two are indistinguishable — both satisfy
+/// the interface, both accept every effect, both play none — which is exactly how a shipped game
+/// comes to run record-only, and how a CI suite comes to assert playback against a recorder.
+[<RequireQualifiedAccess>]
+type Silence =
+    /// `NullBackend.create` — record-only, chosen deliberately (FR-002).
+    | Requested
+    /// `OpenAlBackend.create` could not open a device and degraded to Null (FR-004). Carries the
+    /// device's own account of why, which is the only one anyone will get.
+    | DeviceUnavailable of reason: string
+
+/// Public contract type (#34). What a caller is actually HOLDING, asked without a type test and
+/// without exception handling. Before this, the only way to know was `:? NullBackend.T`, so nothing
+/// asked.
+[<RequireQualifiedAccess>]
+type BackendKind =
+    /// The bundled OpenAL backend, with a device actually open.
+    | DeviceBacked
+    /// A record-only backend: it accepts every effect and plays none. `Silence` says why.
+    | RecordOnly of Silence
+    /// An `IAudioBackend` this library did not build — a product's own backend, or a test fake.
+    /// Neither `DeviceBacked` nor `RecordOnly`: this library cannot say whether it reaches a device,
+    /// and will not guess that it does. Whoever built it already knows what it is.
+    | Unknown
+
 /// Public contract module. A pure, total minimal PCM WAV reader (no device, no OpenAL types).
 [<RequireQualifiedAccess>]
 module Wav =
@@ -322,8 +351,13 @@ module NullBackend =
         interface IAudioBackend
         /// Accumulated evidence — equal to `FS.GG.Audio.Core.Audio.interpret` of the same batch.
         member Evidence: AudioEvidence
+        /// Why this backend is silent (#34): `Requested` when the product built it on purpose,
+        /// `DeviceUnavailable` when `OpenAlBackend.create` substituted it. Prefer `Backend.kindOf`,
+        /// which answers the same question for ANY `IAudioBackend` without a type test.
+        member Silence: Silence
 
-    /// Create a fresh Null backend.
+    /// Create a fresh Null backend. Its `Silence` is `Requested` — this is the deliberate,
+    /// record-only backend, never a substitution.
     val create: unit -> T
 
 /// Public contract module. The real OpenAL device backend (Silk.NET.OpenAL) (FR-003, FR-004).
@@ -335,10 +369,17 @@ module OpenAlBackend =
     /// instead (degrade-to-zero, FR-004) — the returned IAudioBackend is always usable, never null,
     /// and never throws into game code.
     ///
+    /// **That substitution is silent unless you ask (#34).** The returned value is an `IAudioBackend`
+    /// either way, so a caller who does not check cannot tell a device from a tape recorder: a shipped
+    /// game runs record-only, and a headless test suite asserts playback against a recorder and passes
+    /// *because* nothing played. Ask `Backend.isDeviceBacked` (or `Backend.kindOf`, which also carries
+    /// the device's reason) — in a product, to surface "no audio device" in its own UI rather than
+    /// trusting stderr; in a test, to SKIP loudly rather than assert vacuously.
+    ///
     /// The device backend also implements `IMixingBackend` (#11), so driven by `FS.GG.Audio.Engine`
-    /// it spatializes: pan reaches the hardware, and bus fades/ducks reach the music voice. Test it
-    /// with `:? IMixingBackend` rather than assuming — the Null fallback does not, which is exactly
-    /// what makes the Engine take its non-positional degrade path on a machine with no device.
+    /// it spatializes: pan reaches the hardware, and bus fades/ducks reach the music voice. The Null
+    /// fallback does not, which is exactly what makes the Engine take its non-positional degrade path
+    /// on a machine with no device.
     /// Spatialization is per-source, so a positional sound must be a **mono** asset; OpenAL plays a
     /// stereo buffer centred, whatever position it is given.
     ///
@@ -347,3 +388,34 @@ module OpenAlBackend =
     /// stderr (#28, see `AssetDiagnostics`). Playback is otherwise untouched, and a missing track in
     /// particular does not stop the music already playing.
     val create: resolver: AssetResolver -> IAudioBackend
+
+/// Public contract module (#34). Ask what a backend actually IS, without a type test and without
+/// exception handling — so a caller can tell a real device from a Null that was substituted under it.
+[<RequireQualifiedAccess>]
+module Backend =
+
+    /// What this backend is, and — if it is silent — why. Total and non-throwing.
+    ///
+    /// Both backends this library builds are matched positively; anything else is `Unknown`, never
+    /// assumed `DeviceBacked`. A record-only test fake is an `IAudioBackend` that is not
+    /// `NullBackend.T`, so a "not-Null means device" rule would wave it through as audible — the same
+    /// vacuous green this type exists to prevent.
+    val kindOf: backend: IAudioBackend -> BackendKind
+
+    /// True ONLY for a backend this library opened a device for (`BackendKind.DeviceBacked`).
+    ///
+    /// This is the predicate a TEST SUITE must branch on before it trusts its own audio assertions.
+    /// On a headless box `OpenAlBackend.create` degrades to Null, so a test that drives playback is
+    /// asserting against a recorder and passes *because* nothing played. Skip loudly (`Ignored`)
+    /// rather than assert vacuously — a green tick on a subject that was never constructed is
+    /// reporting on nothing.
+    ///
+    /// `BackendKind.Unknown` is `false`, deliberately: a custom backend may well drive real hardware,
+    /// but this library did not build it and cannot say. Guessing `true` is the fail-open answer, and
+    /// it is the one that lets a record-only fake pass for a device. A caller who built its own backend
+    /// knows what it is and has no reason to ask.
+    ///
+    /// It says nothing about whether the device is *currently* answering: a real device that has since
+    /// died is still `DeviceBacked`, and `DeviceDiagnostics` (#33) is what reports that. This answers
+    /// "was a device ever opened".
+    val isDeviceBacked: backend: IAudioBackend -> bool

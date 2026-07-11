@@ -21,6 +21,36 @@ type IMixingBackend =
     abstract member SetListener: x: float * y: float * z: float -> unit
     abstract member PlayAt: sound: SoundId * gain: float * pan: float -> unit
 
+// WHY a backend makes no sound (#34), and the distinction is the entire point of this type. A Null
+// backend the product ASKED for is correct and expected — it is the default, and the test/CI backend
+// (FR-002). One that `OpenAlBackend.create` SUBSTITUTED, because no device would open, is a game
+// running silently. At the `IAudioBackend` seam those two are indistinguishable: both satisfy the
+// interface, both accept every effect, both play none.
+// RequireQualifiedAccess, like every other DU in this file: `open FS.GG.Audio.Host` must not inject
+// bare `Requested`/`Unknown`/`DeviceBacked` into a consumer's scope, where they would collide with
+// names a game defines for its own reasons.
+[<RequireQualifiedAccess>]
+type Silence =
+    /// `NullBackend.create` — chosen deliberately (FR-002).
+    | Requested
+    /// `OpenAlBackend.create` could not open a device and degraded to Null (FR-004). Carries the
+    /// device's own account of why, which is the only one anyone will get.
+    | DeviceUnavailable of reason: string
+
+// What a caller is actually HOLDING (#34) — askable without a type test and without exception
+// handling, which is what lets a CI suite skip loudly instead of asserting against a tape recorder.
+[<RequireQualifiedAccess>]
+type BackendKind =
+    /// The bundled OpenAL backend, with a device actually open.
+    | DeviceBacked
+    /// A record-only backend: it accepts every effect and plays none. `Silence` says why.
+    | RecordOnly of Silence
+    /// An `IAudioBackend` this library did not build — a product's own backend, or a test fake. We
+    /// cannot say whether it reaches a device, and MUST NOT guess `DeviceBacked`: that is how the
+    /// guard this type exists to provide would wave a record-only fake through as audible, which is
+    /// #34 one level up. Whoever built it knows what it is and does not need to ask.
+    | Unknown
+
 // Reach Core's Audio module without shadowing the host's own `Audio` module below.
 module CoreAudio = FS.GG.Audio.Core.Audio
 
@@ -453,8 +483,13 @@ module Audio =
 module NullBackend =
 
     [<Sealed>]
-    type T() =
+    type T(silence: Silence) =
         let mutable evidence = CoreAudio.emptyEvidence
+        // The default is `Requested`: `create ()` is the product/test/CI backend asking for record-only
+        // on purpose. Only `OpenAlBackend.create` builds one with `DeviceUnavailable`, and it is the
+        // only caller that should — a substitution nobody asked for is the whole of #34.
+        new() = new T(Silence.Requested)
+        member _.Silence = silence
         member _.Evidence = evidence
         interface IAudioBackend with
             member _.Play(effect: AudioEffect) =
@@ -761,6 +796,56 @@ module OpenAlBackend =
         try
             new OpenAl.Backend(resolver) :> IAudioBackend
         with ex ->
-            // Degrade-to-zero (FR-004): no device / no native library -> Null backend, logged.
-            eprintfn "FS.GG.Audio.Host: OpenAL unavailable (%s); using the Null backend." ex.Message
-            NullBackend.create () :> IAudioBackend
+            // Degrade-to-zero (FR-004) is UNCHANGED and not in question: no device / no native library
+            // must never crash game code. What changed is that the substitution is no longer only a
+            // line on a channel nobody reads (#34). It is carried IN the returned value — ask
+            // `Backend.kindOf` / `Backend.isDeviceBacked` — because a single print at construction is
+            // not a sufficient account of "nothing this process plays will ever be audible": it scrolls
+            // past, most shipped games never surface stderr, and a CI suite cannot branch on a log line.
+            // Addressed to whoever reads a shipped game's stderr, so it says what happened and the one
+            // thing to do about it. How to write a TEST against this lives in the `.fsi` doc, where its
+            // audience actually is — not here, in an end user's support log.
+            eprintfn
+                "FS.GG.Audio.Host: OpenAL unavailable (%s) — using the record-only Null backend, so NOTHING this process plays will be audible. This is the deliberate degrade (FR-004), not a crash. Do not rely on seeing this line: ask Backend.isDeviceBacked and surface it in your own UI."
+                ex.Message
+            new NullBackend.T(Silence.DeviceUnavailable ex.Message) :> IAudioBackend
+
+[<RequireQualifiedAccess>]
+module Backend =
+
+    // What did I actually get? (#34) Before this, the only way to know was `:? NullBackend.T` — a type
+    // test against the fallback, awkward and silent about WHY. So nothing asked, and two things went
+    // unnoticed: a shipped game running record-only because a machine had no sound card, and — the
+    // serious one — a headless CI suite asserting playback against a recorder, green *because* nothing
+    // played. A gate that reports green on a subject it never constructed is reporting on nothing.
+    //
+    // Both known backends are matched POSITIVELY, and anything else is `Unknown` rather than assumed
+    // audible. The tempting `| _ -> DeviceBacked` is the unsafe default: every record-only test fake
+    // in this repo (and every product's own stub) is an `IAudioBackend` that is not `NullBackend.T`,
+    // so it would report `DeviceBacked`, and the guard below would wave it through as audible — which
+    // is exactly the vacuous green this whole item exists to kill, reintroduced by its own fix.
+    // Unknown ⇒ "I cannot vouch for this", never "sure, it plays".
+    //
+    // Total and non-throwing, so a test can branch on it in the same breath as building the backend.
+    let kindOf (backend: IAudioBackend) : BackendKind =
+        match backend with
+        | :? OpenAl.Backend -> BackendKind.DeviceBacked
+        | :? NullBackend.T as nb -> BackendKind.RecordOnly nb.Silence
+        | _ -> BackendKind.Unknown
+
+    // True ONLY for a backend this library opened a device for. The predicate a CI suite branches on
+    // to SKIP (loudly, `Ignored`) rather than assert vacuously.
+    //
+    // `Unknown` is false, deliberately: a custom backend may well drive real hardware, but this library
+    // did not build it and cannot say — and the caller who DID build it already knows what it is, so it
+    // has no reason to ask. Guessing `true` here would be the fail-open answer, and it is the one that
+    // lets a record-only fake pass for a device.
+    //
+    // It says nothing about whether the device is *currently* answering: a real device that has since
+    // died is still `DeviceBacked`, and #33's DeviceDiagnostics is what reports that. This answers
+    // "was a device ever opened", which is the question a test must settle before trusting itself.
+    let isDeviceBacked (backend: IAudioBackend) : bool =
+        match kindOf backend with
+        | BackendKind.DeviceBacked -> true
+        | BackendKind.RecordOnly _
+        | BackendKind.Unknown -> false

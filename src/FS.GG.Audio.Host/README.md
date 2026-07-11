@@ -74,7 +74,12 @@ whenever bus volume, ducking, fades or 3D matter. (Elmish products have the same
 - `NullBackend.create` — the record-only backend; its `Evidence` equals `Core.Audio.interpret` of
   the same batch.
 - `OpenAlBackend.create` — opens an OpenAL device, or logs the reason and returns a Null backend.
-  The result is always usable, never null, and never throws into game code.
+  The result is always usable, never null, and never throws into game code. **That substitution is
+  silent unless you ask** — see `Backend` below.
+- `Backend.kindOf` / `Backend.isDeviceBacked` — what did I actually get? Answers `DeviceBacked`,
+  `RecordOnly of Silence` (`Requested` — you asked for it; or `DeviceUnavailable reason` — it was
+  substituted under you), or `Unknown` for a backend this library did not build. No type test, no
+  exception handling.
 - `AssetResolver` — caller-supplied `SoundId`/`TrackId` → WAV bytes. An unresolved id is a recorded
   no-op, not a throw.
 - `Wav.tryParse` — a total, device-free minimal PCM WAV reader; returns `None` on anything it does
@@ -83,8 +88,26 @@ whenever bus volume, ducking, fades or 3D matter. (Elmish products have the same
 ## Determinism
 
 `NullBackend` is the default backend under test: no device is opened and the recorded evidence is
-the assertion surface. The OpenAL path is exercised only behind an opt-in manual lane, never in the
-CI assertion path.
+the assertion surface.
+
+The OpenAL path, by contrast, is exercised by whatever the machine happens to have. `OpenAlBackend.create`
+degrades to `NullBackend` when no device opens (FR-004), so on a headless box a test that drives
+playback is asserting against a **recorder** — and passes *because* nothing played. A green tick on a
+subject that was never constructed is reporting on nothing.
+
+So a test that needs a real device must **ask, and skip loudly when it has no subject** (#34):
+
+```fsharp
+let backend = OpenAlBackend.create resolver
+if Backend.isDeviceBacked backend then
+    // a device really opened — assert against it
+else
+    skiptest "no audio device here — reported Ignored rather than Passed"
+```
+
+`isDeviceBacked` is `false` for `Unknown` on purpose: a record-only fake is an `IAudioBackend` that
+is not `NullBackend.T`, so a "not-Null means device" rule would wave it through as audible — the same
+vacuous green, one level up.
 
 ## License
 
