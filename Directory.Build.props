@@ -8,6 +8,47 @@
     <RestoreLockedMode Condition="'$(ContinuousIntegrationBuild)' == 'true' And Exists('$(MSBuildProjectDirectory)/packages.lock.json')">true</RestoreLockedMode>
   </PropertyGroup>
 
+  <!-- ONE AUTHORITATIVE FEED, ON EVERY MACHINE (#31).
+       ================================================
+       `nuget.config` promises a hermetic restore: nuget.org and nothing else. It could not keep that
+       promise, and its own comment already feared exactly this. The F# SDK adds its BUNDLED copy of
+       FSharp.Core as an extra restore source through MSBuild rather than through NuGet's source list,
+       so `<clear />` under `<packageSources>` never sees it:
+
+         Microsoft.FSharp.NetSdk.targets
+           <PropertyGroup Condition=" '$(DisableImplicitLibraryPacksFolder)' != 'true' ">
+             <RestoreAdditionalProjectSources Condition="Exists('$(_FSharpCoreLibraryPacksFolder)')">
+               $(RestoreAdditionalProjectSources);$(_FSharpCoreLibraryPacksFolder)
+
+       On an unpatched checkout that really does evaluate to `;<sdk>/FSharp/library-packs` — see for
+       yourself with `dotnet msbuild <proj> -getProperty:RestoreAdditionalProjectSources`.
+
+       The bundled copy is a DIFFERENT BUILD of FSharp.Core from the one nuget.org serves, with a
+       different lock `contentHash`. Whichever source wins writes ITS hash into packages.lock.json, so
+       the lock records a MACHINE-DEPENDENT value and a locked-mode restore on a machine that resolves
+       the other way fails NU1403. That is #31 — and it is why `c2a0ead` ("Regenerate lockfiles from a
+       clean nuget.org restore") already had to be done once: regenerating the lock only re-picks a
+       winner, it does not stop the coin toss.
+
+       `DisableImplicitLibraryPacksFolder` is the SDK's own public switch for this (it has shipped
+       since at least 6.0.4xx, and `Microsoft.NET.NuGetOfflineCache.targets` honours it too). Prefer
+       it over overriding the private `_FSharpCoreLibraryPacksFolder`, which is an implementation
+       detail that could be renamed without warning.
+
+       Belt AND braces: `nuget.config` also declares a `packageSourceMapping`, which is the structural
+       guarantee — NuGet then refuses ANY source not named in the mapping, including sources appended
+       by MSBuild, so this stays fixed even if the SDK renames the switch above.
+
+       Neither change touches WHICH FSharp.Core is used — the version is still pinned by
+       Directory.Packages.props. Only WHERE it comes from, so that every machine agrees.
+
+       Trade-off, accepted: the bundled copy was also a genuine air-gapped fallback, so a restore with
+       NO reachable source now fails NU1100 instead of quietly resolving FSharp.Core from the SDK. A
+       reproducible lock file is worth more than an offline restore nobody in this repo performs. -->
+  <PropertyGroup>
+    <DisableImplicitLibraryPacksFolder>true</DisableImplicitLibraryPacksFolder>
+  </PropertyGroup>
+
   <!-- Package metadata for the publishable FS.GG.Audio.* set (org house style; mirrors the
        sibling FS-GG repos). Only IsPackable=true projects carry it into a .nupkg. -->
   <PropertyGroup Label="Package">
