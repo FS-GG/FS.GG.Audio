@@ -5,7 +5,12 @@ open FS.GG.Audio.Core
 
 /// Public contract type. Caller-supplied resolution of product-owned ids to PCM (WAV) bytes.
 /// The host does NOT own the id -> asset mapping (FR-005); a product supplies these functions.
-/// `None` => unresolved: the host treats it as a recorded no-op, never a throw.
+///
+/// `None` => unresolved: the host treats it as a no-op, never a throw — the id plays as SILENCE.
+/// That is a real failure mode and the one a game developer actually hits (a typo'd id, an asset
+/// that was never shipped), so the device backend does not swallow it: it names the id and the
+/// reason once, on stderr (#28). See `AssetDiagnostics`. The Null backend records the request
+/// regardless — it resolves nothing, so its evidence says "requested", never "audible".
 type AssetResolver =
     { ResolveSound: SoundId -> byte[] option
       ResolveTrack: TrackId -> byte[] option }
@@ -119,6 +124,63 @@ module VoicePool =
         /// Stop and delete every handle the pool owns.
         member DisposeAll: unit -> unit
 
+/// Public contract module (#28). The missing-asset diagnostic. A `SoundId`/`TrackId` that does not
+/// become a playable buffer used to be pure silence: the device backend's `None` legs were a bare
+/// `()`, so a typo'd or unshipped asset played nothing and reported nothing, and a caller could not
+/// tell "played" from "your asset is missing". It is now named — the id, the reason, and the fix —
+/// once per id.
+///
+/// Device-free (it holds product ids and an emit callback, no OpenAL types), which is what lets the
+/// failure leg be exercised headless: the backend that hits it in anger needs a real device.
+[<RequireQualifiedAccess>]
+module AssetDiagnostics =
+
+    /// Why an id produced no playable buffer. Three distinct fixes, so the diagnostic names which
+    /// one rather than just reporting silence.
+    type Failure =
+        /// The product's `AssetResolver` returned `None` — the id names nothing the product could
+        /// hand over. The headline case: a typo'd id, or an asset that was never shipped.
+        | Unresolved
+        /// Bytes came back, but they are not a PCM WAV `Wav.tryParse` understands. An authoring or
+        /// export problem, not a missing file.
+        | NotWav of bytes: int
+        /// A WAV that parsed, whose channel/bit-depth pair has no OpenAL buffer format — only
+        /// 8-/16-bit mono and stereo do. A conversion problem.
+        | UnsupportedFormat of channels: int * bitsPerSample: int
+
+    /// The asset that failed, carrying the product's own id — the only handle the host has on it.
+    type Asset =
+        | Sound of SoundId
+        | Track of TrackId
+
+    /// The diagnostic line for one failure: the id, the consequence (silence), and the thing the
+    /// product actually controls. Pure and total — a value rather than a print, so a test asserts on
+    /// it directly.
+    ///
+    /// It deliberately does NOT name a file path: the host does not own the id -> asset mapping
+    /// (FR-005), so no path exists at this layer to name. It names the `AssetResolver` function that
+    /// returned `None` instead — that closure is where the product's mapping lives, and it is the
+    /// thing the reader has to go and look at.
+    val message: asset: Asset -> failure: Failure -> string
+
+    /// A warn-once-per-id latch over `message`.
+    [<Sealed>]
+    type T =
+        /// A latch emitting through `emit` — the OpenAL backend passes stderr (the channel it
+        /// already warns on), a test passes a buffer.
+        new: emit: (string -> unit) -> T
+        /// Report that `asset` failed with `failure`: emits `message` the FIRST time this id is
+        /// reported, and never again for that id.
+        ///
+        /// Warn-once is load-bearing, not politeness. A failed resolve is deliberately NOT cached
+        /// (`BufferCache.GetOrAdd`, so a later successful resolve still populates the entry), which
+        /// means the failure leg is re-entered on EVERY play of the missing id — printing from
+        /// there would emit a line per frame for a cue the product retriggers, burying the message
+        /// it is delivering.
+        member Report: asset: Asset * failure: Failure -> unit
+        /// Distinct ids reported so far — one emitted line each.
+        member ReportedCount: int
+
 /// Public contract module. The imperative drive (FR-006).
 [<RequireQualifiedAccess>]
 module Audio =
@@ -173,4 +235,9 @@ module OpenAlBackend =
     /// what makes the Engine take its non-positional degrade path on a machine with no device.
     /// Spatialization is per-source, so a positional sound must be a **mono** asset; OpenAL plays a
     /// stereo buffer centred, whatever position it is given.
+    ///
+    /// An id `resolver` cannot resolve — or resolves to bytes this backend cannot decode — plays as
+    /// SILENCE (there is nothing to play), but not silently: the id and the reason are named once on
+    /// stderr (#28, see `AssetDiagnostics`). Playback is otherwise untouched, and a missing track in
+    /// particular does not stop the music already playing.
     val create: resolver: AssetResolver -> IAudioBackend
