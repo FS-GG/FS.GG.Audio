@@ -71,8 +71,75 @@ jobs:
           exit 1
       - name: Build (Debug, --no-restore)
         run: dotnet build FS.GG.Audio.slnx -c Debug --no-restore
-      - name: Test (full headless suite, --no-restore)
-        run: dotnet test FS.GG.Audio.slnx -c Debug --no-restore
+      # Make this suite non-vacuous (#42, epic .github#416 — the silent no-op family). TWO things are
+      # needed, and each is useless without the other:
+      #
+      # 1. LD_LIBRARY_PATH -> the bundled libopenal.so. Without it the native library is never
+      #    RESOLVED at all: the P/Invoke throws, OpenAlBackend.create degrades to the Null fallback,
+      #    and you get `RecordOnly` — which is INDISTINGUISHABLE from "there is no sound card". The
+      #    runner carries no system OpenAL to fall back to. A resolution failure was wearing a device
+      #    failure's clothes, which is why "just set ALSOFT_DRIVERS" did not work here.
+      #
+      # 2. ALSOFT_DRIVERS=null. OpenAL Soft ships a `null` OUTPUT DRIVER: a real OpenAL device that
+      #    renders to nothing. alcOpenDevice succeeds, so create returns the REAL OpenAl.Backend and
+      #    the whole device path — buffer upload, source pooling and the #20 voice ceiling, PlayAt/pan,
+      #    the #28 asset diagnostics, the #33 device-fault latch — actually executes. Inaudibly,
+      #    deterministically, with no sound card and no PulseAudio.
+      #
+      # Verified ON THE RUNNER, all three legs:
+      #   no LD_LIBRARY_PATH            -> RecordOnly                                     (lib not loaded)
+      #   LD_LIBRARY_PATH + drivers=null  -> DeviceBacked                                   (what we want)
+      #   LD_LIBRARY_PATH + drivers=bogus -> RecordOnly (DeviceUnavailable "no output device")  (control)
+      - name: Test (full headless suite, real OpenAL device via the null driver)
+        env:
+          # QUOTED, deliberately. Bare `null` is the YAML null scalar, so `ALSOFT_DRIVERS: null` sets
+          # the variable EMPTY — OpenAL falls back to the default drivers, finds no device, and the
+          # device lane silently goes unrun again. "null" is the driver's NAME.
+          ALSOFT_DRIVERS: "null"
+        run: |
+          set -euo pipefail
+
+          # Every linux-x64 native folder the build produced. `dotnet test` runs the whole solution,
+          # so collect them all rather than guessing which project carries the one that matters.
+          #
+          # ABSOLUTE paths, and that is not a style preference: LD_LIBRARY_PATH entries are resolved
+          # against each PROCESS's cwd, and the test host runs from the test project's OUTPUT
+          # directory, not the repo root. Relative entries therefore point nowhere, the lib goes
+          # unresolved, and you are back to a silent RecordOnly. (This exact bug cost a CI round-trip.)
+          native_dirs="$(find "$PWD" -type d -path '*/runtimes/linux-x64/native' | sort -u)"
+          if [ -z "$native_dirs" ]; then
+            echo "::error::no runtimes/linux-x64/native directory in the build output — the OpenAL native asset was not produced, so the device lane cannot run and this gate would silently test nothing."
+            exit 1
+          fi
+          LD_LIBRARY_PATH="$(printf '%s' "$native_dirs" | paste -sd: -)${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          export LD_LIBRARY_PATH
+          echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH"
+
+          dotnet test FS.GG.Audio.slnx -c Debug --no-restore 2>&1 | tee test-output.txt
+
+          # A skip is now a REGRESSION, not a fact of life: with the lib resolved and the null driver
+          # selected, the device lane MUST execute. `dotnet test` cannot fail on skip, so assert it.
+          #
+          # FAIL CLOSED (epic .github#266). The first cut of this summed with `bc`, which is not
+          # installed everywhere; the sum errored, `${skipped:-0}` swallowed it, and the check PASSED
+          # on a run with a skipped test — a guard that silently never fires, which is the very defect
+          # it exists to catch. Hence: awk, and an unreadable summary is an ERROR, never a pass.
+          #
+          # Count OCCURRENCES, not lines: parallel `dotnet test` summaries interleave onto one line,
+          # so `grep -c` undercounts. The `|| true` is load-bearing: under `pipefail` a non-matching
+          # grep would abort the step before the diagnostic below could print.
+          counts="$( { grep -oE 'Skipped:[[:space:]]*[0-9]+' test-output.txt || true; } | grep -oE '[0-9]+' || true )"
+          summaries="$(printf '%s' "$counts" | grep -c . || true)"
+          if [ "${summaries:-0}" -eq 0 ]; then
+            echo "::error::could not read a test summary from dotnet test output — refusing to report a green gate off an unparsed result. Did the tests run at all, or did the output format change?"
+            exit 1
+          fi
+          skipped="$(printf '%s\n' "$counts" | awk '{s+=$1} END {print s+0}')"
+          if [ "$skipped" -ne 0 ]; then
+            echo "::error::$skipped test(s) SKIPPED. The OpenAL device lane must execute here — a skip means the real backend was not constructed and the device path went unrun (the #42 hole). A gate that exits 0 over a permanently-skipped device test is the silent no-op this repo has already fixed four times. Investigate; do not delete this assertion."
+            exit 1
+          fi
+          echo "device lane exercised — 0 skipped."
 
       # A missing package readme surfaces only at `dotnet pack`/push, never in a normal build or
       # test run — the same late, release-time-only failure class as the NU5104 trap. Pack here so
