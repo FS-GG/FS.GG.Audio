@@ -201,6 +201,73 @@ module VoicePool =
             free.Clear()
 
 [<RequireQualifiedAccess>]
+module AssetDiagnostics =
+
+    // Why an id produced no playable buffer (#28). Three distinct fixes, so the diagnostic names
+    // which one rather than saying "no sound": a missing asset is a resolver/shipping problem, a bad
+    // file is an authoring problem, an unsupported format is a conversion problem.
+    type Failure =
+        | Unresolved
+        | NotWav of bytes: int
+        | UnsupportedFormat of channels: int * bitsPerSample: int
+
+    // The asset that failed, carrying the product's own id — the only handle the host has on it.
+    type Asset =
+        | Sound of SoundId
+        | Track of TrackId
+
+    let private describe (asset: Asset) =
+        match asset with
+        | Sound(SoundId id) -> sprintf "sound '%s'" id
+        | Track(TrackId id) -> sprintf "track '%s'" id
+
+    let private resolverFn (asset: Asset) =
+        match asset with
+        | Sound _ -> "AssetResolver.ResolveSound"
+        | Track _ -> "AssetResolver.ResolveTrack"
+
+    // The line for one failure. A value rather than a print, so a test asserts on it directly. It
+    // cannot name the file it looked for — the host does not own the id -> asset mapping (FR-005),
+    // so no path exists at this layer — and names the resolver function that failed instead, which
+    // is where the product's mapping actually lives.
+    let message (asset: Asset) (failure: Failure) : string =
+        let what = describe asset
+        match failure with
+        | Unresolved ->
+            sprintf
+                "FS.GG.Audio.Host: %s did not resolve to an asset — %s returned None, so every play of it is silent. The host does not own the id -> file mapping (FR-005): check the resolver your product supplies (a typo'd id, or an asset that was never shipped)."
+                what
+                (resolverFn asset)
+        | NotWav bytes ->
+            sprintf
+                "FS.GG.Audio.Host: %s resolved to %d bytes that are not a PCM WAV this reader understands, so every play of it is silent. Re-export it as PCM WAV (RIFF/WAVE, fmt + data chunks)."
+                what
+                bytes
+        | UnsupportedFormat(channels, bits) ->
+            sprintf
+                "FS.GG.Audio.Host: %s is a %d-channel %d-bit WAV, which OpenAL has no buffer format for, so every play of it is silent. Convert it to 8- or 16-bit mono or stereo (mono if it is positional — OpenAL spatializes mono buffers only)."
+                what
+                channels
+                bits
+
+    // A warn-once-per-id latch over `message`. Device-free (it holds ids and an emit callback, no
+    // OpenAL types), which is what lets the failure leg be asserted headless — the backend that
+    // hits it in anger cannot be constructed without a device.
+    [<Sealed>]
+    type T(emit: string -> unit) =
+        let reported = Collections.Generic.HashSet<Asset>()
+
+        // Warn-once is load-bearing, not politeness: a failed resolve is deliberately NOT cached
+        // (BufferCache.GetOrAdd), so this leg is re-entered on EVERY play of the missing id — a
+        // bare print here would emit once a frame for a cue the product retriggers.
+        member _.Report(asset: Asset, failure: Failure) : unit =
+            if reported.Add asset then
+                emit (message asset failure)
+
+        // Distinct ids reported so far — one emitted line each.
+        member _.ReportedCount = reported.Count
+
+[<RequireQualifiedAccess>]
 module Audio =
 
     // The effects a raw backend structurally CANNOT realize (#27). SetBusVolume and Duck are
@@ -338,36 +405,57 @@ module private OpenAl =
                 appliedMusicGain <- gain
             | _ -> ()
 
+        // A missing or unplayable asset used to be pure silence (#28): both lookups below ended in a
+        // bare `None`, so a typo'd or unshipped id played nothing and reported nothing, and a caller
+        // could not tell "played" from "your asset is missing". Name it once per id, on the channel
+        // this file already warns on (the voice ceiling above, OpenAL-unavailable in `create`).
+        // `fun line -> eprintfn ...` and NOT the shorter `AssetDiagnostics.T(eprintfn "%s")`: the
+        // partial application would bind Console.Error ONCE, here, pinning the latch to the writer
+        // that existed at construction — so a later Console.SetError (how this suite captures
+        // stderr) would never see the line. Every other eprintfn in this file is a direct call and
+        // re-reads the writer; this matches them.
+        let assetDiagnostics = AssetDiagnostics.T(fun line -> eprintfn "%s" line)
+
         // Decode + upload a WAV to a fresh AL buffer. Callers reach this only through the id-keyed
-        // caches below, so a given asset is parsed and uploaded at most once.
-        let uploadBuffer (bytes: byte[]) : uint option =
+        // caches below, so a given asset is parsed and uploaded at most once. Failure says WHICH
+        // step failed, so the diagnostic can name the fix rather than just the silence (#28).
+        let uploadBuffer (bytes: byte[]) : Result<uint, AssetDiagnostics.Failure> =
             match Wav.tryParse bytes with
-            | None -> None
+            | None -> Error(AssetDiagnostics.NotWav bytes.Length)
             | Some pcm ->
                 match bufferFormat pcm.Channels pcm.BitsPerSample with
-                | None -> None
+                | None -> Error(AssetDiagnostics.UnsupportedFormat(pcm.Channels, pcm.BitsPerSample))
                 | Some fmt ->
                     let buf = al.GenBuffer()
                     al.BufferData(buf, fmt, pcm.Data, pcm.SampleRate)
-                    Some buf
+                    Ok buf
+
+        // Resolve -> decode -> upload, reporting whichever step failed. Shared by both caches so a
+        // missing track is exactly as loud as a missing sound.
+        let resolveBuffer (asset: AssetDiagnostics.Asset) (resolve: unit -> byte[] option) : uint option =
+            match resolve () with
+            | None ->
+                assetDiagnostics.Report(asset, AssetDiagnostics.Unresolved)
+                None
+            | Some bytes ->
+                match uploadBuffer bytes with
+                | Ok buf -> Some buf
+                | Error failure ->
+                    assetDiagnostics.Report(asset, failure)
+                    None
 
         // The cached buffer for a sound/track id, uploaded once on first use (resolve failures are
-        // not cached, so a later successful resolve still populates the entry).
+        // not cached, so a later successful resolve still populates the entry — which is precisely
+        // why the diagnostic latches per id rather than printing from this leg).
         let soundBuffer (sound: SoundId) : uint option =
             soundBuffers.GetOrAdd(
                 sound,
-                fun () ->
-                    match resolver.ResolveSound sound with
-                    | Some bytes -> uploadBuffer bytes
-                    | None -> None)
+                fun () -> resolveBuffer (AssetDiagnostics.Sound sound) (fun () -> resolver.ResolveSound sound))
 
         let trackBuffer (track: TrackId) : uint option =
             trackBuffers.GetOrAdd(
                 track,
-                fun () ->
-                    match resolver.ResolveTrack track with
-                    | Some bytes -> uploadBuffer bytes
-                    | None -> None)
+                fun () -> resolveBuffer (AssetDiagnostics.Track track) (fun () -> resolver.ResolveTrack track))
 
         // Point an already-allocated source at `buf` and (re)start it. Every source is
         // listener-relative with the distance model switched off, so its position is read as a pure
@@ -396,6 +484,8 @@ module private OpenAl =
                     eprintfn
                         "FS.GG.Audio.Host: OpenAL one-shot source ceiling (%d) reached; stealing the oldest voice per play — overlapping sounds will be dropped."
                         oneShotCeiling
+            // Still a no-op — there is nothing to play — but no longer a *silent* one: soundBuffer
+            // reported the id and the reason on its way to None (#28).
             | None -> ()
 
         interface IAudioBackend with
@@ -430,6 +520,9 @@ module private OpenAl =
                             configureAndPlay src buf loop gain None
                             musicSource <- Some src
                             appliedMusicGain <- gain
+                        // As in playOneShot: nothing to play, but trackBuffer has already named the
+                        // track and the reason (#28). The music voice is left exactly as it was — a
+                        // missing new track does not stop the track that is playing.
                         | None -> ()
                     | StopMusic ->
                         musicSource |> Option.iter (fun s -> al.SourceStop s; al.DeleteSource s)

@@ -306,4 +306,60 @@ let tests =
             Expect.equal (Set.ofList fake.StopCalls) (Set.ofList [ a; b ]) "each sounding voice is stopped before deletion"
             Expect.equal pool.ActiveCount 0 "the pool is emptied"
         }
+
+        // --- #28: a missing sound asset is silence — say which id, and why, once. ---
+
+        test "a missing asset is named, not swallowed — the id and the resolver that failed (#28)" {
+            // The defect: `SoundId "explosion"` resolving to nothing played nothing and REPORTED
+            // nothing, so a typo'd or unshipped asset was indistinguishable from a played one.
+            let line = AssetDiagnostics.message (AssetDiagnostics.Sound(SoundId "explosion")) AssetDiagnostics.Unresolved
+            Expect.stringContains line "explosion" "the diagnostic names the id that failed"
+            Expect.stringContains line "silent" "...and the consequence, so it is not mistaken for a warning about nothing"
+            // It cannot name a path — the host does not own the id -> file mapping (FR-005) — so it
+            // names the product-supplied function that returned None, which is where the fix lives.
+            Expect.stringContains line "AssetResolver.ResolveSound" "...and points at the resolver the product supplies"
+        }
+
+        test "a missing track names the track resolver, not the sound one (#28)" {
+            let line = AssetDiagnostics.message (AssetDiagnostics.Track(TrackId "theme")) AssetDiagnostics.Unresolved
+            Expect.stringContains line "theme" "the diagnostic names the track"
+            Expect.stringContains line "AssetResolver.ResolveTrack" "a missing track points at ResolveTrack"
+        }
+
+        test "an undecodable asset is distinguished from a missing one (#28)" {
+            // Three failures, three different fixes: ship the asset / re-export it / convert it.
+            // Collapsing them into one "no sound" is what sent the last reader to a template comment
+            // in another repo to find out what was wrong.
+            let notWav = AssetDiagnostics.message (AssetDiagnostics.Sound(SoundId "s")) (AssetDiagnostics.NotWav 1234)
+            Expect.stringContains notWav "not a PCM WAV" "bytes that are not a WAV say so"
+            Expect.stringContains notWav "1234" "...and how many bytes came back, so an HTML 404 body is recognisable"
+
+            let badFormat =
+                AssetDiagnostics.message (AssetDiagnostics.Sound(SoundId "s")) (AssetDiagnostics.UnsupportedFormat(6, 24))
+            Expect.stringContains badFormat "6-channel 24-bit" "an unsupported format names the format it got"
+            Expect.stringContains badFormat "mono or stereo" "...and the one it needs"
+        }
+
+        test "the missing-asset diagnostic fires once per id, not once per play (#28)" {
+            // Load-bearing: BufferCache deliberately does NOT cache a failed resolve (see the #20
+            // test above), so the backend re-enters this leg on EVERY play of the missing id. A cue
+            // retriggered each frame would emit a line each frame and bury its own message.
+            let lines = ResizeArray<string>()
+            let diagnostics = AssetDiagnostics.T(lines.Add)
+            let missing = AssetDiagnostics.Sound(SoundId "explosion")
+
+            for _ in 1..60 do
+                diagnostics.Report(missing, AssetDiagnostics.Unresolved)
+
+            Expect.equal lines.Count 1 "sixty plays of one missing id emit one line, not sixty"
+            Expect.equal diagnostics.ReportedCount 1 "one distinct id reported"
+
+            // But a *different* missing id is genuinely new information, and is not latched away.
+            diagnostics.Report(AssetDiagnostics.Sound(SoundId "footstep"), AssetDiagnostics.Unresolved)
+            Expect.equal lines.Count 2 "a second missing id is reported on its own"
+            // ...and so is the same string under the other id type: SoundId "x" is not TrackId "x".
+            diagnostics.Report(AssetDiagnostics.Track(TrackId "explosion"), AssetDiagnostics.Unresolved)
+            Expect.equal lines.Count 3 "a track is not deduped against a sound with the same name"
+            Expect.equal diagnostics.ReportedCount 3 "three distinct assets reported"
+        }
     ]
