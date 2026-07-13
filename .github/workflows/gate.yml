@@ -227,3 +227,25 @@ jobs:
               exit 1
             fi
           done
+
+  # ── Cross-repo contract-coherence gate ──────────────────────────────────────────────────
+  # Adopted per FS-GG/.github#519 (decision: yes, the framework repos call it). The gate lives
+  # in FS-GG/.github and is CALLED, never copied — it asserts that the org registry is
+  # schema-valid and that its declared `fsgg-contracts` pin equals the ACTUAL FS.GG.Contracts
+  # package version.
+  #
+  # `check-build-config: false` because registry/repos.yml does NOT list `build-config` under
+  # this repo's `receives:` — it is not an adopter of the org-shared .NET build config, so the
+  # drift leg has no subject here and would fail on a file this repo is not supposed to have.
+  # This is read off the registry, not a workaround: if that `receives:` row ever gains
+  # `build-config`, flip this to true in the same change.
+  #
+  # `packages: read` is MANDATORY for callers: the gate restores the typed fsgg-sdd registry
+  # validator from the org GitHub Packages feed using the run-scoped GITHUB_TOKEN.
+  contract-coherence:
+    uses: FS-GG/.github/.github/workflows/contract-coherence.yml@main
+    permissions:
+      contents: read
+      packages: read
+    with:
+      check-build-config: false
