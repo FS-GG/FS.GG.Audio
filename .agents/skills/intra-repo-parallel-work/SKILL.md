@@ -85,6 +85,10 @@ If the work is cross-repo (needs a change/release from *another* FS-GG repo), us
 ## The loop
 
 **Once per machine, first:** `dotnet tool install -g FS.GG.Coord.Cli`
+**And keep it current:** `dotnet tool update -g FS.GG.Coord.Cli` — a global tool does NOT self-update, and
+**a stale engine is worse than no engine** (#655). `fsgg-coord` carries a floor and REFUSES to shadow
+below it (a recorded skip, never an error), because engines before `0.1.1` mis-parse every dotfile path
+and will call a HELD item startable (#649).
 
 Optional, and safe to skip — `fsgg-coord` works exactly as before without it. What it buys is the
 **shadow** (ADR-0034): with an engine present, every `take`/`next`/`batch` is decided by *both* the
@@ -327,13 +331,25 @@ scripts/fsgg-coord say <issue> --to <worker> 'I own src/Audio until this lands.'
 scripts/fsgg-coord inbox --repo <r>          # what is new for me, across every live claim
 ```
 
-Widening a touch-set mid-flight re-checks it **and notifies whoever it now collides with**:
+`widen` **re-declares** a touch-set mid-flight. It sets `Paths:` to exactly what you pass — it does
+not union with what was there — then re-checks the result against every live claim **and notifies
+whoever it now collides with**:
 
 ```sh
 scripts/fsgg-coord widen <issue> --paths "src/Scene/**, src/Audio/**"   # non-zero on a collision
 ```
 
 Stop editing the shared paths until the collision is resolved.
+
+**So it narrows, too — and narrowing is the direction nobody ever uses.** Pass a smaller set and the
+reservation genuinely shrinks. A narrowing can never be refused for collision, because a subset
+collides with nothing its superset did not; the capability is already there and it is safe. The name
+says "widen" and only the *growth* direction is ever taught, so an over-reservation is **never handed
+back** — it holds for the full lease, against files nobody is touching, and the workers it locks out
+see only a dead queue ([#601](https://github.com/FS-GG/.github/issues/601)).
+
+**When you learn your declaration over-reserves, re-declare it smaller — at once, not at merge.**
+[pnext-item §3](../pnext-item/SKILL.md) names the two triggers that actually fire.
 
 ## 5. Finish — the earned done-stamp (unchanged)
 
