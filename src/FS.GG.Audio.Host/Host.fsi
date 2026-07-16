@@ -22,6 +22,16 @@ type IAudioBackend =
     inherit IDisposable
     /// Realize one requested effect. Volumes arrive already clamped by Core. Never throws; a
     /// backend that cannot act degrades to a no-op.
+    ///
+    /// NOT THREAD-SAFE, and implementations are not required to be: drive a backend from ONE thread.
+    /// That is a deliberate contract rather than an oversight — a game mixes on one thread, and
+    /// locking a per-effect call to serve a case nobody has would cost every caller for nothing. It
+    /// is written down because the surface does not imply it: nothing about `Play` looks
+    /// thread-affine, and `FS.GG.Audio.Elmish`'s `Audio.Cmd` hands the drive to the Elmish runtime,
+    /// which runs effects on whatever thread it likes.
+    ///
+    /// The bundled OpenAL backend is thread-affine for a second, harder reason: OpenAL's context
+    /// currency is process-wide, so no lock on this type could make it safe. See `OpenAlBackend.create`.
     abstract member Play: effect: AudioEffect -> unit
 
 /// Public contract type (004-audio-engine). Optional mixing/spatial control a backend MAY
@@ -378,6 +388,11 @@ module Audio =
 module NullBackend =
 
     /// A record-only backend: opens no device, never throws.
+    ///
+    /// Like every backend here it is NOT thread-safe and should be driven from one thread. It makes
+    /// exactly one concurrency guarantee, and only because it used to be free and would otherwise
+    /// have been lost: reading `Evidence` while another thread is in `Play` will not throw. Two
+    /// threads in `Play` interleave as they always did.
     [<Sealed>]
     type T =
         interface IAudioBackend
@@ -434,6 +449,13 @@ module OpenAlBackend =
     /// SILENCE (there is nothing to play), but not silently: the id and the reason are named once on
     /// stderr (#28, see `AssetDiagnostics`). Playback is otherwise untouched, and a missing track in
     /// particular does not stop the music already playing.
+    ///
+    /// ONE THREAD PER BACKEND — and in practice, one backend. OpenAL's context currency
+    /// (`alcMakeContextCurrent`) is process-wide rather than per-object. Each backend re-asserts its
+    /// own context before every device call, so two backends **on one thread** coexist correctly
+    /// (they did not before 2026-07-16: the second silently broke the first, and every call on it
+    /// came back `AL_INVALID_NAME`). But two backends driven from two threads race for that currency
+    /// by construction, and no lock inside this library can fix it. A game wants one device backend.
     val create: resolver: AssetResolver -> IAudioBackend
 
 /// Public contract module (#34). Ask what a backend actually IS, without a type test and without

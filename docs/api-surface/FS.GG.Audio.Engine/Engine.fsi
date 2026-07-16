@@ -43,6 +43,18 @@ type Voice =
 /// Public contract type. The mixing/voice engine: named buses with independent gain, active
 /// fade/duck envelopes, the listener, and the single music voice. A pure, deterministic state
 /// model advanced once per frame by `Engine.step`; it opens no device of its own and never throws.
+///
+/// NOT THREAD-SAFE. Drive one engine from ONE thread: `step`, `fadeBus`, `crossFade` and
+/// `setListener` all mutate shared state with no locking, and the observables (`BusGain`,
+/// `LastVoices`, `MusicGain`) read it. Two threads in `step` can corrupt the bus dictionaries — a
+/// torn resize is not a wrong gain, it is undefined behaviour, and it will not announce itself.
+///
+/// Deliberate, not an omission: a game mixes on one thread, and locking a per-frame call to serve a
+/// case nobody has would cost every caller for nothing. It is written down because the surface does
+/// not imply it — an `Engine.T` looks like an ordinary object, and `FS.GG.Audio.Elmish`'s
+/// `Audio.Cmd.ofEngine` hands `step` to the Elmish runtime, which runs effects on whatever thread it
+/// likes. If that is not your engine's thread, that is the caller's problem to solve, and this is the
+/// notice that there is one to solve.
 [<Sealed>]
 type T =
     /// The bus's own realized gain in `[0,1]` (base gain shaped by any active fade, times any

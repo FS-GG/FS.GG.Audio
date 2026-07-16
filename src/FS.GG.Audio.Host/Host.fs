@@ -827,6 +827,27 @@ module private OpenAl =
         // worse than none. Clear it going in, so what comes out is ours.
         let guarded (op: DeviceDiagnostics.Operation) (action: unit -> bool) : unit =
             try
+                // Make THIS backend's context current before touching it, every time.
+                //
+                // `alcMakeContextCurrent` is PROCESS-WIDE, not per-object: the constructor above sets
+                // this context current, and the next backend anyone builds silently takes that away.
+                // Source and buffer handles are scoped to the context that made them, so the first
+                // backend then addresses its own sources against someone else's context and every call
+                // comes back AL_INVALID_NAME. Verified against a real device: backend A plays cleanly,
+                // constructing backend B breaks A on every play, disposing B fixes A again.
+                //
+                // Two backends in one process is admittedly rare in a game. It is not rare in a TEST
+                // SUITE, where each case builds its own — and the failure is a silent one, so it
+                // presents as "the assertions in one test stopped meaning anything" rather than as an
+                // error. This repo has been bitten by that shape often enough.
+                //
+                // Cheap: OpenAL Soft early-outs when the requested context is already current, which
+                // is every call in the single-backend case that everyone actually has.
+                //
+                // It does NOT make the backend thread-safe, and cannot: the currency it sets is
+                // process-wide, so two threads doing this race by construction. One thread per
+                // backend remains the contract — see the .fsi.
+                alc.MakeContextCurrent context |> ignore
                 al.GetError() |> ignore
                 let reached = action ()
                 match al.GetError() with
@@ -972,6 +993,11 @@ module private OpenAl =
 
             member _.Dispose() =
                 try
+                    // Same reason as `guarded`: every handle deleted below belongs to THIS context,
+                    // and if another backend has since made its own current these deletes address the
+                    // wrong one, come back AL_INVALID_NAME, and leak every source and buffer this
+                    // backend owns — quietly, since the `with _ -> ()` below swallows it.
+                    alc.MakeContextCurrent context |> ignore
                     voices.DisposeAll()
                     musicSource |> Option.iter (fun s -> al.SourceStop s; al.DeleteSource s)
                     for buf in soundBuffers.Handles do al.DeleteBuffer buf

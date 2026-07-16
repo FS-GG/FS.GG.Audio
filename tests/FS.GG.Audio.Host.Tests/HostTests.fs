@@ -764,6 +764,66 @@ let tests =
                     backend.Dispose()
             })
 
+        // `alcMakeContextCurrent` is PROCESS-WIDE, so building a second backend used to take the
+        // current context away from the first. Handles are context-scoped, so the first backend then
+        // addressed its own sources against someone else's context and every call came back
+        // AL_INVALID_NAME. Verified against a real device before the fix: A played cleanly, B's
+        // construction broke A, B's disposal fixed A again.
+        //
+        // Rare in a game; NOT rare in a test suite, where each case builds its own backend — and
+        // silent, so it presents as "one test's assertions quietly stopped meaning anything".
+        // Note this test could not have been written before the alGetError check (#33 / report §3.4):
+        // the whole failure was invisible.
+        testSequenced (
+            test "a second backend does not steal the first one's context (report §3.8)" {
+                let resolver =
+                    { ResolveSound = (fun _ -> Some(sampleWav ()))
+                      ResolveTrack = (fun _ -> None) }
+                let a = OpenAlBackend.create resolver
+                try
+                    match Backend.kindOf a with
+                    | BackendKind.DeviceBacked ->
+                        // A MUST PLAY BEFORE B EXISTS, and this line is the entire test.
+                        //
+                        // Handles are scoped to the context that created them, and this play is what
+                        // makes A create some — a buffer, via the id cache, and a pooled source — in
+                        // A's OWN context. Only then does B stealing currency put A's handles and A's
+                        // current context out of agreement.
+                        //
+                        // Without this warm-up the test is VACUOUS, and looked fine: A's first play
+                        // would happen after B's construction, so A's buffer and source would be
+                        // created inside B's context, be perfectly consistent there, and report no
+                        // error with or without the fix. Caught by mutating — it passed against the
+                        // unfixed backend.
+                        a.Play(CoreAudio.playSfx (SoundId "a-sound") 1.0)
+                        let b = OpenAlBackend.create resolver
+                        try
+                            // Now drive A again, with B's context current and A's handles belonging
+                            // to A's.
+                            let original = System.Console.Error
+                            use captured = new System.IO.StringWriter()
+                            System.Console.SetError captured
+                            try
+                                a.Play(CoreAudio.playSfx (SoundId "a-sound") 1.0)
+                            finally
+                                System.Console.SetError original
+                            let text = captured.ToString()
+                            Expect.isFalse
+                                (text.Contains "the audio device failed on")
+                                (sprintf
+                                    "the first backend must keep working once a second exists — it reported: %s"
+                                    (text.Trim()))
+                        finally
+                            b.Dispose()
+                    | kind ->
+                        skiptest (
+                            sprintf
+                                "no OpenAL device (%A) — context currency is a real-device property and there is no subject here."
+                                kind)
+                finally
+                    a.Dispose()
+            })
+
         test "DeviceDiagnostics.message names the operation, the degrade, and the way back (#33)" {
             let error = System.InvalidOperationException "AL_INVALID_OPERATION" :> exn
 

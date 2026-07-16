@@ -503,6 +503,38 @@ volume.
 
 ### 3.8 MEDIUM — No thread safety, and no documentation saying so
 
+> **Status: FIXED 2026-07-16 — and the aside turned out to be the real bug.**
+>
+> The documentation contract is in: `IAudioBackend`, `Engine.T`, `NullBackend.T`,
+> `OpenAlBackend.create` and `Audio.Cmd.ofEngine` all now state that instances are not thread-safe and
+> must be driven from one thread, and say why it is a deliberate contract rather than an omission. No
+> locks added — a game mixes on one thread, and locking a per-frame call to serve a case nobody has
+> would cost every caller for nothing.
+>
+> **The paragraph this finding threw away at the end — "constructing a second `OpenAlBackend`
+> silently steals the current context from the first" — was not a footnote. It was an active,
+> reproducible bug**, and the only part of §3.8 that was more than documentation. Verified against a
+> real device: backend A plays cleanly; **constructing B breaks A on every play** (`AL_INVALID_NAME`,
+> since handles are scoped to the context that made them); disposing B fixes A. Fixed properly rather
+> than documented away — each backend re-asserts its own context before every device call, so two
+> backends on one thread now coexist. `Dispose` does the same, or it deletes another context's handles
+> and leaks its own.
+>
+> Rare in a game; **not rare in a test suite**, where each case builds its own backend — and silent,
+> so it presents as "one test's assertions quietly stopped meaning anything". This repo's own two
+> unsequenced device tests are exposed to it and pass only because they assert type facts, which a
+> stolen context cannot disturb.
+>
+> **It was only visible because of §3.4.** Before the `alGetError` fix this failure set an error code,
+> threw nothing, and was reported as a success — the #33 work paid for itself within a day by exposing
+> a second real bug.
+>
+> The test for it was **vacuous on the first attempt and passed against the unfixed backend**: it
+> created B before A had ever played, so A's handles were created *inside B's context*, were
+> consistent there, and reported nothing. It needed A to play first. Caught by mutating, not by
+> reading — the fourth time in this series that a test of mine claimed more than it checked.
+
+
 Verified: **zero** synchronization primitives across `src/` (no `lock`, `Concurrent*`, `Interlocked`,
 `volatile`), and **zero** mentions of threading in any `.fsi`.
 
@@ -807,7 +839,7 @@ The existing `Engine.step` fuzz result (§2) shows the approach works: `step` is
 | 6 | ~~Fix the pan law to `dx / distance`. Add an off-axis-but-ahead test.~~ **DONE 2026-07-16** (§3.5). Also fixed a `nan` `Pan` found in the process, and corrected §2's overstated fuzz claim. | MED-HIGH | ~~~1 h~~ |
 | 7 | ~~Treat non-finite `seconds` as immediate in `fadeBus`/`crossFade`~~ **DONE 2026-07-16** (§3.6) — but **not as recommended**: folding `+infinity` in would silence the music instantly. `nan` only. | MED | ~~~30 min~~ |
 | 8 | ~~Add `THIRD-PARTY-NOTICES.md`, pack into Host/Elmish, fix `README.md:13` dep table.~~ **DONE 2026-07-16** (§3.9) — and into **Engine** too, which the finding missed. Gated both directions. Wording still wants a human/legal read. | MED (legal) | ~~~1 h~~ |
-| 9 | Document the single-thread contract on `Engine.T`, `IAudioBackend`, `Cmd.ofEngine`. | MED | ~30 min |
+| 9 | ~~Document the single-thread contract on `Engine.T`, `IAudioBackend`, `Cmd.ofEngine`.~~ **DONE 2026-07-16** (§3.8) — plus the context-stealing bug the finding mentioned in passing, which was real and is now fixed rather than documented. | MED | ~~~30 min~~ |
 | 10 | Reconsider `crossFade`'s `EndG = 1.0` overriding the target bus's volume. | MED (design) | discuss |
 | 11 | Give `release.yml:56` gate.yml's device env + skip guard; add `--locked-mode` at `release.yml:122`. | LOW | ~20 min |
 | 12 | Fix `README.md:48-50`, `gate.yml:145-148`, `Host.fs:66-67` — all three describe behavior that isn't. | LOW | ~20 min |

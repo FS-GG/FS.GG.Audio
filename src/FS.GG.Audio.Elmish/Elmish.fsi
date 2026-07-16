@@ -42,6 +42,14 @@ module Audio =
         /// installed via `Engine.fadeBus`/`crossFade`) advance only as the engine is stepped, so
         /// drive this each frame for them to progress and restore. The caller owns the `Engine.T`
         /// and the per-frame `dt` (exactly as a direct `Engine.step` caller does). Dispatches no message.
+        ///
+        /// AN `Engine.T` IS NOT THREAD-SAFE, AND THIS IS THE SURFACE WHERE THAT MATTERS. A `Cmd` is a
+        /// description: the Elmish runtime decides when — and on which THREAD — to run it. The caller
+        /// owns the engine, so the caller owns ensuring the runtime's effect thread is the thread that
+        /// owns the engine. Nothing here can check it, and a mismatch corrupts the engine's bus state
+        /// silently rather than raising. Under the standard Elmish runtime, effects run on the thread
+        /// that dispatched — the ordinary single-threaded loop, where this is a non-issue. It is worth
+        /// knowing about if yours dispatches from elsewhere.
         val ofEngine: engine: T -> dt: float -> effects: AudioEffect list -> Elmish.Cmd<'msg>
 
         /// Play one sound effect straight at the backend, no mixing (mirrors `Core.Audio.playSfx`).
