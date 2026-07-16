@@ -128,7 +128,68 @@ let tests =
             let v = List.exactlyOne engine.LastVoices
             Expect.isTrue v.Positional "3D voice is positional on a mixing backend"
             Expect.floatClose acc v.EffectiveGain (1.0 / 3.0) "att = ref/(ref+rolloff*(d-ref)) = 1/3 at d=3"
-            Expect.floatClose acc v.Pan 1.0 "pan clamps to +1 for a hard-right emitter"
+            // Exactly on the +x axis, so the azimuth is 90 degrees and sin is 1 — hard right without
+            // any clamping being involved. This assertion passed under the old `dx / RefDistance` law
+            // too, which is precisely why that law survived: every pan test in this suite put the
+            // source on an axis, the one geometry where both formulas agree.
+            Expect.floatClose acc v.Pan 1.0 "a source due right of the listener is panned hard right"
+        }
+
+        // The geometry the suite never tried, and the only one that tells the two laws apart.
+        test "3D: pan follows the ANGLE to the source, not its lateral offset (FR-005)" {
+            let engine = Engine.create (mixing () :> IAudioBackend)
+            Engine.setListener engine 0.0 0.0 0.0
+            let panAt x z =
+                Engine.step engine 0.0 [ CoreAudio.playSfx3D (SoundId "s") x 0.0 z 1.0 ]
+                (List.exactlyOne engine.LastVoices).Pan
+
+            // 2m right but 50m ahead: ~2 degrees off centre. The old law read the 2m of lateral
+            // offset, divided by RefDistance (1.0), clamped, and panned this HARD RIGHT — as
+            // aggressively as a source beside the listener's head.
+            let nearlyAhead = panAt 2.0 -50.0
+            Expect.isLessThan (abs nearlyAhead) 0.05 "a source 2 degrees off centre is very nearly centred"
+
+            // Same lateral offset, no depth: genuinely due right, genuinely hard right. Same dx as
+            // above — so under the old law these two were indistinguishable, and that was the bug.
+            Expect.floatClose acc (panAt 2.0 0.0) 1.0 "the same 2m offset with no depth IS hard right"
+
+            // 45 degrees ahead-right: sin 45 = 0.7071. A real continuum, not a switch.
+            Expect.floatClose acc (panAt 5.0 -5.0) (sqrt 2.0 / 2.0) "45 degrees off centre pans to sin 45"
+            Expect.floatClose acc (panAt -5.0 -5.0) (-(sqrt 2.0) / 2.0) "and mirrors to the left"
+
+            // Pure direction: distance changes attenuation, never pan. The old law had |pan| growing
+            // with lateral distance until it saturated.
+            Expect.floatClose acc (panAt 1.0 -1.0) (panAt 100.0 -100.0) "same bearing, 100x the distance, same pan"
+        }
+
+        test "3D: pan is monotonic in azimuth and total on nonsense positions (FR-005)" {
+            let engine = Engine.create (mixing () :> IAudioBackend)
+            Engine.setListener engine 0.0 0.0 0.0
+            let panAt x z =
+                Engine.step engine 0.0 [ CoreAudio.playSfx3D (SoundId "s") x 0.0 z 1.0 ]
+                (List.exactlyOne engine.LastVoices).Pan
+
+            // Sweep from straight ahead round to due right at a fixed 10m: pan must rise STRICTLY.
+            // Strict is the whole assertion. The old law saturated at +1 as soon as the lateral
+            // offset passed RefDistance (1m) — i.e. from ~6 degrees onward — and then plateaued, so a
+            // non-strict `<=` here would pass on the very shape this is meant to reject: a binary
+            // left/right switch wearing a monotonic curve's clothes. Every distinct bearing must
+            // produce a distinct pan.
+            let bearings = [ 0.0 .. 5.0 .. 90.0 ] |> List.map (fun deg -> deg * System.Math.PI / 180.0)
+            let pans = bearings |> List.map (fun a -> panAt (10.0 * sin a) (-10.0 * cos a))
+            for (a, b) in List.pairwise pans do
+                Expect.isLessThan a b "pan rises strictly as the source swings toward the ear — no plateau"
+            Expect.isGreaterThan (List.last pans - List.head pans) 0.9 "and it spans the range rather than saturating early"
+
+            // Total on nonsense (Principle VI). `nan` fails BOTH comparisons in a naive clamp, so it
+            // would come back as a nan Pan and break the [-1,1] the .fsi promises. Centred is the
+            // defined answer, and the one Host.Spatial.panToPosition already gives.
+            for bad in [ nan; infinity; -infinity ] do
+                let p = panAt bad 0.0
+                Expect.isFalse (System.Double.IsNaN p) (sprintf "pan is never nan (x=%f)" bad)
+                Expect.isTrue (abs p <= 1.0) (sprintf "pan stays in [-1,1] (x=%f)" bad)
+            let p = panAt nan nan
+            Expect.equal p 0.0 "a wholly non-finite position is centred, not nan"
         }
 
         test "3D degrades to a non-positional voice without a mixing backend (FR-005, FR-008)" {

@@ -51,8 +51,16 @@ type T(config: SpatialConfig, backend: IAudioBackend, device: DeviceDiagnostics.
     let clamp01 (v: float) =
         if v <= 0.0 || Double.IsNaN v then 0.0 elif v >= 1.0 then 1.0 else v
 
+    // NaN-total, like clamp01 above, and for the same reason: `nan < -1.0` and `nan > 1.0` are BOTH
+    // false, so the obvious version hands `nan` straight back — and a `nan` Pan breaks the `[-1, 1]`
+    // the .fsi promises for it. nan folds to 0.0 = dead centre, which is the same answer
+    // `Host.Spatial.panToPosition` already gives a nan pan, so the two agree on nonsense input
+    // instead of one of them quietly relying on the other to clean up.
     let clampUnit (v: float) =
-        if v < -1.0 then -1.0 elif v > 1.0 then 1.0 else v
+        if Double.IsNaN v then 0.0
+        elif v < -1.0 then -1.0
+        elif v > 1.0 then 1.0
+        else v
 
     let applyCurve curve (startG: float) (endG: float) (p: float) =
         let p = if p < 0.0 then 0.0 elif p > 1.0 then 1.0 else p
@@ -93,7 +101,8 @@ type T(config: SpatialConfig, backend: IAudioBackend, device: DeviceDiagnostics.
             if kv.Value.Elapsed >= kv.Value.Duration then doneDucks.Add kv.Key
         for b in doneDucks do ducks.Remove b |> ignore
 
-    // Inverse-distance-clamped attenuation on the planar (x,z) distance + stereo pan by x (DEC-001).
+    // Inverse-distance-clamped attenuation on the planar (x,z) distance + stereo pan by AZIMUTH
+    // (DEC-001). y is not consulted: the model is planar, as DEC-001 decided.
     let spatial (x: float) (z: float) =
         let (lx, _, lz) = listener
         let dx, dz = x - lx, z - lz
@@ -101,7 +110,25 @@ type T(config: SpatialConfig, backend: IAudioBackend, device: DeviceDiagnostics.
         let capped = match config.MaxDistance with Some m when raw > m -> m | _ -> raw
         let d = max capped config.RefDistance
         let att = config.RefDistance / (config.RefDistance + config.Rolloff * (d - config.RefDistance))
-        let pan = clampUnit (if config.RefDistance <= 0.0 then dx else dx / config.RefDistance)
+        // Pan is `dx / distance` — the SINE OF THE AZIMUTH — and it is a pure direction: how far off
+        // to the side the source is, not how far away.
+        //
+        // It used to be `dx / RefDistance`, which consulted the lateral offset alone and never `dz`.
+        // Two things were wrong with that, and neither is subtle once a source is placed off the axis
+        // the tests used. Depth was ignored: a source 2m right and 50m AHEAD is ~2 degrees off centre
+        // and was panned hard to one ear, as aggressively as one beside the listener's head. And
+        // RefDistance — documented as DISTANCE ATTENUATION configuration and nothing else — silently
+        // doubled as the pan width, so at its default of 1.0 anything more than one world unit off
+        // axis was fully panned. In a game measured in metres that made 3D audio a binary left/right
+        // switch, and made tuning attenuation silently re-tune panning.
+        //
+        // `raw`, not `capped`: MaxDistance caps how far away a thing SOUNDS, and using it here would
+        // bend the direction the sound comes FROM. Only attenuation is capped.
+        //
+        // Front/back is not recoverable in a stereo pan — a source 45 degrees behind-right and one 45
+        // degrees ahead-right both give +0.707 — and that is inherent to the seam (a scalar pan), not
+        // to this formula. Elevation is out by DEC-001.
+        let pan = if raw <= 0.0 then 0.0 else clampUnit (dx / raw)
         clamp01 att, pan
 
     member _.BusGain(bus: Bus) = busGain bus

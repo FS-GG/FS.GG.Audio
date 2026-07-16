@@ -69,7 +69,7 @@ unfounded. Each was executed on this machine.
 | `dotnet build FS.GG.Audio.slnx -c Debug` | Clean. 0 warnings, 0 errors, under `TreatWarningsAsErrors`. |
 | `dotnet test FS.GG.Audio.slnx -c Debug` | **69/69 pass**, 0 skipped (Core 10, Host 29, Engine 21, Elmish 9), ~320 ms. |
 | `dotnet run --project samples/FS.GG.Audio.Sample` | Runs; transcript deterministic, matches its documented narrative. |
-| `Engine.step` totality (`.fsi`: *"Total; never throws"*) | **Holds.** Fuzzed over `{nan, ±inf, ±1e308, ±0.0, 1e-320}` across `dt` × volume × all 5 buses: **0 throws, 0 invariant violations.** Every `BusGain`/`EffectiveGain` stayed in `[0,1]`, every `Pan` in `[-1,1]`. The clamping discipline is real. |
+| `Engine.step` totality (`.fsi`: *"Total; never throws"*) | **Holds** — 0 throws over `{nan, ±inf, ±1e308, ±0.0, 1e-320}` across `dt` × volume × all 5 buses; every `BusGain`/`EffectiveGain` in `[0,1]`. ⚠️ **The `Pan` half of this claim was wrong** (see §3.5): the fuzz ran over `NullBackend`, which is not an `IMixingBackend`, so `PlaySfx3D` degraded and the spatial path was never reached. Re-run over a mixing backend it found **7 violations** — `Pan` could be `nan`. Fixed 2026-07-16; the totality result stands. |
 | Degrade-to-Null (FR-004) | **Works**, under a *harsher* failure than designed for: with the Silk.NET assembly wholly unresolvable, `OpenAlBackend.create` still returned `RecordOnly (DeviceUnavailable …)`, accepted `Play`, disposed cleanly. No throw escaped. |
 | `Backend.kindOf` / `isDeviceBacked` (#34) | Correct — reported `RecordOnly` carrying the device's own reason in the value. |
 | `.fsi` ↔ `docs/api-surface/` parity | **Zero drift** across all four packages. |
@@ -340,6 +340,33 @@ code through `deviceDiagnostics.Report` as a synthesized exception (or, better, 
 `exn`). Also query `ALC_MONO_SOURCES` rather than hard-coding 240.
 
 ### 3.5 MEDIUM-HIGH — 3D panning ignores depth; 3D is effectively a binary L/R switch
+
+> **Status: FIXED 2026-07-16.** `pan` is now `dx / distance` — the sine of the azimuth — a pure
+> direction that does not vary with distance. `RefDistance` no longer doubles as the pan width, and
+> the `.fsi` now says so on `SpatialConfig` ("Attenuation ONLY"). Re-running this section's own
+> reproduction: the 2.3°-off source panned **+1.00 before, +0.04 after**; on-axis sources still pan
+> ±1.00. The sample transcript is byte-identical (all its 3D sources are on-axis).
+>
+> `raw`, not `capped`, is used for the divisor: `MaxDistance` caps how far away a source *sounds*,
+> and using it here would bend the direction it comes *from*.
+>
+> **A second bug was found while fixing this: `Voice.Pan` could be `nan`.** `clampUnit` was not
+> NaN-total (`nan < -1.0` and `nan > 1.0` are both false, so it returned `nan` unchanged), breaking
+> the `[-1, 1]` the `.fsi` promises. Now folds to `0.0` (centred) — the same answer
+> `Host.Spatial.panToPosition` already gives, so the two agree on nonsense rather than one relying on
+> the other to clean up.
+>
+> **That bug also exposes an error in this report's own §2.** The fuzz reported there claimed *"every
+> `Pan` in `[-1,1]`"* as verified. It used `NullBackend`, which is **not** an `IMixingBackend` — so
+> every `PlaySfx3D` took the degrade path and `spatial` was never called once. The fuzz proved
+> `Engine.step`'s totality (that part stands) and proved **nothing whatever** about the pan law. Re-run
+> against a real mixing backend, it found **7 invariant violations** immediately. A test that cannot
+> reach the code it claims to cover is the report's own recurring criticism, made by the report.
+>
+> Mutation-verified both ways: restoring `dx / RefDistance` fails the angle test (`1.0` where `< 0.05`
+> was required) *and* the strict-monotonicity test (`Expected a (1.0) to be less than b (1.0)` — the
+> plateau). The monotonicity assertion is strict for exactly that reason; a non-strict `<=` passed the
+> old law, since a saturated plateau is technically non-decreasing.
 
 **`src/FS.GG.Audio.Engine/Engine.fs:97-105`**
 
@@ -710,7 +737,7 @@ The existing `Engine.step` fuzz result (§2) shows the approach works: `step` is
 | 3 | ~~Make `NullBackend` accumulate in a `ResizeArray`; add a bound or reset.~~ **PARTLY DONE 2026-07-16** — quadratic gone, `Clear()` added. Retention on the FR-004 degrade path remains and needs an owner decision (§3.3, §4c). | HIGH | ~~~1 h~~ |
 | 4 | ~~Check `al.GetError()` inside `guarded`~~ **DONE 2026-07-16** (§3.4). Querying `ALC_MONO_SOURCES` instead of the hard-coded 240 remains open. | HIGH | ~~~2 h~~ |
 | 5 | **Fill the device lane the gate already built** — real resolver + `sampleWav()`, driving `Play`/`PlayAt`/`PlayMusic`/`SetBusGain`/`Dispose`. **STARTED 2026-07-16**: §3.4's fix added the first real assertion (a device error code is named), which proved the lane works end-to-end. The rest of the device path is still type-tested only. | HIGH | ~1.5 h |
-| 6 | Fix the pan law to `dx / distance`. Add an off-axis-but-ahead test. | MED-HIGH | ~1 h |
+| 6 | ~~Fix the pan law to `dx / distance`. Add an off-axis-but-ahead test.~~ **DONE 2026-07-16** (§3.5). Also fixed a `nan` `Pan` found in the process, and corrected §2's overstated fuzz claim. | MED-HIGH | ~~~1 h~~ |
 | 7 | Treat non-finite `seconds` as immediate in `fadeBus`/`crossFade`; make `applyCurve`'s clamp NaN-total. | MED | ~30 min |
 | 8 | Add `THIRD-PARTY-NOTICES.md`, pack into Host/Elmish, fix `README.md:13` dep table. | MED (legal) | ~1 h |
 | 9 | Document the single-thread contract on `Engine.T`, `IAudioBackend`, `Cmd.ofEngine`. | MED | ~30 min |
