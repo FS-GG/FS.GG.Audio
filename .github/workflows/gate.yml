@@ -136,6 +136,21 @@ jobs:
       # .github/actions/headless-test for why this is an action rather than a block pasted into both.
       - uses: ./.github/actions/headless-test
 
+      # The showcase claims, in its own footer, that the transcript is identical every run — the
+      # mixer advances on a fixed dt and only the sleeping is real. That is a claim about the library
+      # (a deterministic mixer), not about the sample, so it is worth holding it to. --fast, because
+      # the real-time run sleeps its way through ~20s of audio for no benefit here.
+      - name: Showcase runs, and is deterministic
+        run: |
+          set -euo pipefail
+          dotnet run --project samples/FS.GG.Audio.Showcase -c Debug --no-restore -- --fast > showcase-1.txt
+          dotnet run --project samples/FS.GG.Audio.Showcase -c Debug --no-restore -- --fast > showcase-2.txt
+          if ! diff -u showcase-1.txt showcase-2.txt; then
+            echo "::error::the showcase transcript differs between two identical runs. Its footer claims determinism and the mixer is supposed to advance on a fixed dt — something is reading the wall clock."
+            exit 1
+          fi
+          echo "showcase deterministic across runs."
+
       # A missing package readme surfaces only at `dotnet pack`/push, never in a normal build or
       # test run — the same late, release-time-only failure class as the NU5104 trap. Pack here so
       # the gate catches it on the PR instead of at the next tag cut.

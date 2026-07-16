@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Program.fs" />
+  </ItemGroup>
+
+  <!-- Every package, because the point is to show every package. Unlike FS.GG.Audio.Sample — which
+       stays deliberately minimal, opens no device, and is the copy-pasteable quick start — this one
+       reaches for the real OpenAL backend and the Elmish Cmd surface as well. -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\FS.GG.Audio.Elmish\FS.GG.Audio.Elmish.fsproj" />
+    <ProjectReference Include="..\..\src\FS.GG.Audio.Engine\FS.GG.Audio.Engine.fsproj" />
+    <ProjectReference Include="..\..\src\FS.GG.Audio.Host\FS.GG.Audio.Host.fsproj" />
+    <ProjectReference Include="..\..\src\FS.GG.Audio.Core\FS.GG.Audio.Core.fsproj" />
+    <PackageReference Include="FSharp.Core" />
+    <PackageReference Include="Elmish" />
+  </ItemGroup>
+
+</Project>

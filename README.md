@@ -43,8 +43,26 @@ Engine.step engine 0.016 [ Audio.playMusic (TrackId "bgm") true
                            Audio.playSfx (SoundId "jump") 0.8 ]
 ```
 
-See **[`samples/FS.GG.Audio.Sample`](samples/FS.GG.Audio.Sample)** for a headless, deterministic
-demo of buses, a fade-in, ducking, and 3D — run it with:
+### Samples
+
+**[`samples/FS.GG.Audio.Showcase`](samples/FS.GG.Audio.Showcase)** — every feature, driven end to end
+and narrated: the pure vocabulary and its clamping, which backend you actually got, buses, fades,
+equal-power cross-fades, ducking, 3D (pan by azimuth + distance attenuation), the asset and
+device diagnostics, the raw path's warning, the Elmish `Cmd` surface, and sinks.
+
+It **synthesizes its own assets** — sine pings and a two-note loop, built as real PCM WAVs in memory —
+so there is nothing to download and nothing is faked: those bytes go through the real WAV reader and
+the real device upload. With an audio device you hear it; without one it degrades and narrates
+(FR-004). The transcript is identical either way, because the mixer advances on a fixed `dt` and only
+the sleeping is real.
+
+```sh
+dotnet run --project samples/FS.GG.Audio.Showcase           # real time, audible
+dotnet run --project samples/FS.GG.Audio.Showcase -- --fast # no sleeping, same transcript
+```
+
+**[`samples/FS.GG.Audio.Sample`](samples/FS.GG.Audio.Sample)** — the minimal quick start: a headless,
+deterministic demo of buses, a fade-in, ducking, and 3D, opening no device at all.
 
 ```sh
 dotnet run --project samples/FS.GG.Audio.Sample
