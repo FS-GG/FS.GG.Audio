@@ -261,7 +261,7 @@ module AssetDiagnostics =
 [<RequireQualifiedAccess>]
 module DeviceDiagnostics =
 
-    /// The guarded device call that threw. Fault runs are counted per operation: a device still
+    /// The guarded device call that failed. Fault runs are counted per operation: a device still
     /// answering `SetBusGain` while it fails every `PlayAt` is not the same as one that has stopped
     /// answering at all, and a working leg's success must not mask a dead leg's run.
     type Operation =
@@ -312,7 +312,7 @@ module DeviceDiagnostics =
         new: emit: (string -> unit) * persistentAfter: int -> T
         /// As above, with `DefaultPersistentAfter`.
         new: emit: (string -> unit) -> T
-        /// Report that `op` threw. Emits the first-fault line the FIRST time `op` faults, and the
+        /// Report that `op` failed. Emits the first-fault line the FIRST time `op` faults, and the
         /// persistent-fault line once `op`'s run reaches `persistentAfter` — each at most once, ever.
         ///
         /// Warn-once is load-bearing, not politeness: these legs are re-entered on every frame, so

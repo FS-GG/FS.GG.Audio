@@ -691,6 +691,79 @@ let tests =
         // to reach in anger, so — exactly as for AssetDiagnostics above — the latch is device-free
         // and is asserted directly. The Engine suite drives the same latch through a live failure. ---
 
+        // THE DEVICE LANE, actually asserting something (report §5). Everything else about the real
+        // backend is checked by type test; this drives it and reads what it says.
+        //
+        // The bug: OpenAL does not raise. It sets a global error code and returns normally, and
+        // Silk.NET is a thin binding that does not translate that into an exception — so `guarded`'s
+        // `try/with` could not see a single failure the DEVICE reported. Worse than missing them: the
+        // action returns true ("I called the hardware"), so a failing call fell through to `Succeeded`
+        // and ENDED the fault run. The latch affirmatively recorded a device as healthy on calls that
+        // had just failed, and #33's escalation could never fire.
+        //
+        // Provoked through the PUBLIC surface, with a real asset: a WAV declaring a sample rate of 0.
+        // `Wav.tryParse` gates on channels/bits/data but not on rate, so it parses, passes
+        // `bufferFormat` as Mono16, and reaches `al.BufferData(..., 0)` — which a real device answers
+        // with `InvalidValue` and no exception. That is a reachable, product-supplied path, not a
+        // synthetic poke.
+        testSequenced (
+            test "a device that reports an error code is named, not silently counted as a success (#33)" {
+                let rateZeroWav =
+                    use ms = new System.IO.MemoryStream()
+                    use w = new System.IO.BinaryWriter(ms)
+                    let data = [| 0uy; 0uy; 1uy; 0uy |]
+                    w.Write(System.Text.Encoding.ASCII.GetBytes "RIFF")
+                    w.Write(36 + data.Length)
+                    w.Write(System.Text.Encoding.ASCII.GetBytes "WAVE")
+                    w.Write(System.Text.Encoding.ASCII.GetBytes "fmt ")
+                    w.Write(16)
+                    w.Write(1s) // PCM
+                    w.Write(1s) // mono
+                    w.Write(0) // <- sample rate 0: OpenAL answers BufferData with InvalidValue
+                    w.Write(0)
+                    w.Write(2s)
+                    w.Write(16s)
+                    w.Write(System.Text.Encoding.ASCII.GetBytes "data")
+                    w.Write(data.Length)
+                    w.Write(data)
+                    w.Flush()
+                    ms.ToArray()
+
+                let resolver =
+                    { ResolveSound = (fun _ -> Some rateZeroWav)
+                      ResolveTrack = (fun _ -> None) }
+
+                let original = System.Console.Error
+                use captured = new System.IO.StringWriter()
+                let backend = OpenAlBackend.create resolver
+                try
+                    match Backend.kindOf backend with
+                    | BackendKind.DeviceBacked ->
+                        System.Console.SetError captured
+                        try
+                            backend.Play(CoreAudio.playSfx (SoundId "rate-zero") 1.0)
+                        finally
+                            System.Console.SetError original
+                        let text = captured.ToString()
+                        // Before the GetError check this text was EMPTY: the call "succeeded", the
+                        // fault run was ended, and the failure left no trace on any channel.
+                        Expect.stringContains
+                            text
+                            "the audio device failed on"
+                            "a device that reported an error code must be named, not counted as a success"
+                        Expect.stringContains text "IAudioBackend.Play" "the failing operation is named"
+                        // The driver's own account of what was wrong with the call — the only account
+                        // anyone gets, and the whole reason the code is carried rather than discarded.
+                        Expect.stringContains text "InvalidValue" "the device's own error code survives into the line"
+                    | kind ->
+                        skiptest (
+                            sprintf
+                                "no OpenAL device (%A) — this asserts what a REAL device reports, and there is nothing here to report it. Skipping loudly rather than asserting against a recorder (#34)."
+                                kind)
+                finally
+                    backend.Dispose()
+            })
+
         test "DeviceDiagnostics.message names the operation, the degrade, and the way back (#33)" {
             let error = System.InvalidOperationException "AL_INVALID_OPERATION" :> exn
 

@@ -413,7 +413,7 @@ module AssetDiagnostics =
 [<RequireQualifiedAccess>]
 module DeviceDiagnostics =
 
-    // The guarded device call that threw (#33). Named rather than free-text because the latch counts
+    // The guarded device call that failed (#33). Named rather than free-text because the latch counts
     // fault runs PER operation: a device still answering SetBusGain while it fails every PlayAt is a
     // different animal from one that has stopped answering at all, and collapsing them would let a
     // working leg's success mask a dead one's run.
@@ -453,14 +453,19 @@ module DeviceDiagnostics =
         let what = describe op
         let why = sprintf "%s: %s" (error.GetType().Name) error.Message
         match fault with
+        // "failed", not "threw". A device reports almost every failure by SETTING AN ERROR CODE and
+        // returning normally — OpenAL never raises — so "threw" was accurate only for the rarest leg
+        // (a missing native library, a marshalling fault) and false for the common one. Likewise
+        // "rather than crashing": an error code was never going to crash anything, and the honest
+        // claim is about what the caller is protected from, which is the failure escaping at all.
         | Transient ->
             sprintf
-                "FS.GG.Audio: the audio device threw on %s (%s). That call degraded to SILENCE rather than crashing, which is the right answer for a hiccup — playback continues. If the device is genuinely gone the fault will repeat, and this will say so again, once."
+                "FS.GG.Audio: the audio device failed on %s (%s). That call produced SILENCE, and the failure was contained rather than escaping into game code — the right answer for a hiccup, and playback continues. If the device is genuinely gone the fault will repeat, and this will say so again, once."
                 what
                 why
         | Persistent consecutive ->
             sprintf
-                "FS.GG.Audio: the audio device has thrown on %s for %d consecutive calls (%s) — this is a PERSISTENT fault, not a hiccup: the device is gone (unplugged, or its driver died). Everything this backend is asked to play is silent for as long as this lasts, and the game will keep running and mixing, inaudibly, without noticing. If it does not come back, rebuild the backend (OpenAlBackend.create) to reopen a device."
+                "FS.GG.Audio: the audio device has failed on %s for %d consecutive calls (%s) — this is a PERSISTENT fault, not a hiccup: the device is gone (unplugged, or its driver died). Everything this backend is asked to play is silent for as long as this lasts, and the game will keep running and mixing, inaudibly, without noticing. If it does not come back, rebuild the backend (OpenAlBackend.create) to reopen a device."
                 what
                 consecutive
                 why
@@ -490,7 +495,8 @@ module DeviceDiagnostics =
 
         new(emit: string -> unit) = T(emit, DefaultPersistentAfter)
 
-        // Report that `op` threw. Emits the first-fault line the FIRST time `op` faults, and the
+        // Report that `op` failed — it threw, or the device reported an error code. Emits the
+        // first-fault line the FIRST time `op` faults, and the
         // persistent-fault line once `op` has faulted `persistentAfter` times with NO intervening
         // success — each at most once, ever.
         //
@@ -677,6 +683,24 @@ module private OpenAl =
         | 2, 16 -> Some BufferFormat.Stereo16
         | _ -> None
 
+    // The carrier for a device failure that arrived as an ERROR CODE rather than an exception, which
+    // is how OpenAL reports essentially everything (see `guarded`). It exists so the one thing the
+    // driver has to say about the failure survives into `DeviceDiagnostics`, which takes an `exn` and
+    // renders `TypeName: Message` — so a reader gets "OpenAlError: InvalidValue" and can look the code
+    // up, rather than a bare "the device failed".
+    //
+    // It is never THROWN, only constructed and handed to the latch. That is deliberate: the degrade
+    // is unchanged (FR-004, Principle VIII), and raising here to satisfy a `try` would convert a
+    // contained device fault into the one thing this backend must never do — escape into game code.
+    //
+    // It lives here rather than in DeviceDiagnostics because that module's stated property is that it
+    // is device-free (no OpenAL types), which is what lets its legs be asserted headless. It takes an
+    // `exn`; only this module knows that the `exn` is standing in for a code.
+    [<Sealed>]
+    type private OpenAlError(code: AudioError) =
+        inherit exn(string code)
+        member _.Code = code
+
     // A real device backend. Construction opens the device/context; failure throws and the caller
     // (create, below) degrades to Null. Per-effect Play is guarded so a runtime device error is a
     // no-op, never a throw.
@@ -773,9 +797,9 @@ module private OpenAl =
         // reason: a lambda, not a partial application, so a later Console.SetError still sees it.
         let deviceDiagnostics = DeviceDiagnostics.T(fun line -> eprintfn "%s" line)
 
-        // One guarded device call: run `action`, degrade a throw to silence, and route it through the
-        // latch — which names the fault once, and names it once more if the operation keeps failing
-        // and so is not a hiccup.
+        // One guarded device call: run `action`, degrade a failure to silence, and route it through
+        // the latch — which names the fault once, and names it once more if the operation keeps
+        // failing and so is not a hiccup.
         //
         // `action` returns whether it actually REACHED the device. That distinction is load-bearing,
         // not bookkeeping: plenty of calls through here touch no hardware at all (a `Duck` the raw
@@ -783,9 +807,31 @@ module private OpenAl =
         // resolved). Such a call completing is no evidence the device is alive, so it must NOT end a
         // fault run — otherwise a dead device is quietly "recovered" by the very calls that never
         // asked it for anything, and the persistent fault is never reported.
+        //
+        // THE `try` IS NOT THE FAULT CHECK, AND USED TO BE THE ONLY ONE. OpenAL does not raise: it
+        // sets a global error code and returns normally, and Silk.NET is a thin binding that does not
+        // translate that into an exception. Verified against a real device — `BufferData` with a
+        // sample rate of 0 yields `InvalidValue`, a bogus source handle yields `InvalidName`, and
+        // NEITHER throws. So `with error ->` caught .NET and marshalling faults (a missing native
+        // library, a bad pointer) and could not see a single failure the DEVICE itself reported.
+        //
+        // The consequence was the exact inversion of this module's purpose. `action` returns true
+        // ("I called the hardware"), so a failing call fell through to `Succeeded`, which ENDS the
+        // fault run — the latch did not merely miss the failure, it affirmatively recorded the device
+        // as healthy on a call that had just failed. A device rejecting everything reported as fine,
+        // and #33's persistent-fault escalation could never fire.
+        //
+        // `GetError` is read twice for one reason: OpenAL's error flag is global and STICKY, holding
+        // the FIRST error until somebody reads it. An unread error left by an earlier call would
+        // otherwise be attributed to this one — a diagnostic naming the wrong operation, which is
+        // worse than none. Clear it going in, so what comes out is ours.
         let guarded (op: DeviceDiagnostics.Operation) (action: unit -> bool) : unit =
             try
-                if action () then deviceDiagnostics.Succeeded op
+                al.GetError() |> ignore
+                let reached = action ()
+                match al.GetError() with
+                | AudioError.NoError -> if reached then deviceDiagnostics.Succeeded op
+                | code -> deviceDiagnostics.Report(op, OpenAlError code)
             with error ->
                 deviceDiagnostics.Report(op, error)
 

@@ -367,5 +367,10 @@ let tests =
             check "FS.GG.Audio.Engine" "Engine.fsi"
             check "FS.GG.Audio.Core" "Audio.fsi"        // additive Core surface bump
             check "FS.GG.Audio.Host" "Host.fsi"         // the raw-path diagnostic surface (#27)
+            // Elmish has had a committed baseline all along and was the one package this never
+            // checked, so its baseline could drift with the gate green — the exact hole the other
+            // three are here to close. A per-package list is what let one go missing; the packages are
+            // not going to stop being four.
+            check "FS.GG.Audio.Elmish" "Elmish.fsi"
         }
     ]

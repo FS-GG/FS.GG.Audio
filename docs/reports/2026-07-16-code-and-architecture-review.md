@@ -275,6 +275,29 @@ claim that is false for the module's biggest caller.
 
 ### 3.4 HIGH — OpenAL errors are never checked; the #33 fault latch is blind at the real device
 
+> **Status: FIXED 2026-07-16.** `guarded` now clears OpenAL's error flag, runs the action, and reads
+> the flag back — reporting a non-`NoError` code through the latch. The double read is required
+> because the flag is global and sticky (it holds the *first* error until read), so an unread error
+> from an earlier call would otherwise be attributed to the wrong operation.
+>
+> **The finding was confirmed against a real device, and it was worse than described.** Verified:
+> `BufferData` with a sample rate of 0 → `InvalidValue`; a bogus source handle → `InvalidName`;
+> **neither throws.** So the `try/with` saw nothing, `action` returned `true`, and the call fell
+> through to `Succeeded` — the latch did not merely miss the failure, it *affirmatively recorded the
+> device as healthy on a call that had just failed*.
+>
+> The message wording is corrected with it: "the audio device **threw** on X … rather than
+> **crashing**" was accurate only for the rarest leg and false for the common one. It now says
+> "failed", and describes the containment rather than a crash that was never going to happen.
+>
+> Guarded by a **real-device test driven through the public surface** — a WAV declaring sample rate 0,
+> which `tryParse` passes (it gates on channels/bits, not rate) and OpenAL rejects with
+> `InvalidValue`. Mutation-verified: with the check removed, the captured stderr is **empty**.
+>
+> *Remaining, minor:* `tryParse` still accepts `sampleRate = 0`, so that asset reaches the device and
+> is diagnosed by #33 rather than by the more useful #28 asset diagnostic (which could name the id).
+> It is no longer silent, which was the bug; naming it better is a follow-up.
+
 **`src/FS.GG.Audio.Host/Host.fs:504-790`** — verified: **`alGetError` / `GetError` appears nowhere in
 the file.**
 
@@ -479,7 +502,27 @@ transitively.
 `<Description>` and `README.md`, correct the dependency table at `README.md:13`. Low effort; the only
 finding here with legal weight.
 
-### 3.10 LOW — The api-surface baseline is gated by nothing
+### 3.10 ~~LOW — The api-surface baseline is gated by nothing~~ — **THIS FINDING WAS WRONG**
+
+> **Retracted 2026-07-16.** The baseline **is** gated, by a test — `EngineTests.fs:360`, *"committed
+> .fsi baselines match the sources, no drift (FR-009)"* — which `gate.yml` runs like any other. It
+> compares `docs/api-surface/<pkg>/<name>.fsi` against `src/<pkg>/<name>.fsi` byte-for-byte and fails
+> the gate on drift.
+>
+> **How the error was made, since it is instructive.** The check was searched for in
+> `.github/workflows/`, found absent there, and reported as absent everywhere. The enforcement lives
+> in the test suite, which is exactly where this repo puts its other structural checks — the same
+> place the reviewer had already been reading. It is the report's own recurring criticism turned on
+> itself: a conclusion asserted from one angle without checking whether the thing existed elsewhere.
+> It then propagated into three PR descriptions ("nothing gates this — see §3.10") before the gate
+> caught a real drift and disproved it.
+>
+> **The residue is a real, narrower finding, now fixed.** The test checked Core, Engine and Host —
+> and **not Elmish**, which has a committed baseline like the other three. So one package's baseline
+> could drift with the gate green. `check "FS.GG.Audio.Elmish" "Elmish.fsi"` is added, and verified
+> to bite. The per-package list is what let one go missing in the first place.
+
+*(Original finding retained below for the record; its premise is false.)*
 
 `docs/api-surface/**` is currently identical to `src/**/*.fsi` — verified, zero drift — but that is
 **discipline, not enforcement**. No workflow compares them; `gate.yml` has no api-surface job, and
@@ -491,7 +534,8 @@ the **real** `.fsi` into each nupkg under `api-surface/`, while `release.yml:167
 of "the public surface" — and the nupkg copy is the one FS.GG.Rendering's generated scaffold mirror
 consumes (cross-repo Audio#106).
 
-**Fix.** A `diff -r docs/api-surface src` step in `gate.yml`. ~5 lines.
+~~**Fix.** A `diff -r docs/api-surface src` step in `gate.yml`. ~5 lines.~~ Unnecessary — the test
+already does this, and a second implementation in YAML would be one more thing to keep in agreement.
 
 ### 3.11 LOW — Three documentation claims are false
 
@@ -664,8 +708,8 @@ The existing `Engine.step` fuzz result (§2) shows the approach works: `step` is
 | 1 | ~~Guard the `Wav.tryParse` chunk walk (`sz <= 0` → stop). Add adversarial WAV tests.~~ **DONE 2026-07-16** — see §3.1. | HIGH | ~~~30 min~~ |
 | 2 | ~~Validate `wFormatTag` at `body+0`; reject non-PCM via the existing `UnsupportedFormat` leg.~~ **DONE 2026-07-16** — but *not* as recommended: `UnsupportedFormat` would have lied, and a blunt tag check would have silenced valid `WAVE_FORMAT_EXTENSIBLE` PCM. See §3.2. | HIGH | ~~~30 min~~ |
 | 3 | ~~Make `NullBackend` accumulate in a `ResizeArray`; add a bound or reset.~~ **PARTLY DONE 2026-07-16** — quadratic gone, `Clear()` added. Retention on the FR-004 degrade path remains and needs an owner decision (§3.3, §4c). | HIGH | ~~~1 h~~ |
-| 4 | Check `al.GetError()` inside `guarded`; query `ALC_MONO_SOURCES` instead of hard-coding 240. | HIGH | ~2 h |
-| 5 | **Fill the device lane the gate already built** — one test, real resolver + `sampleWav()`, driving `Play`/`PlayAt`/`PlayMusic`/`SetBusGain`/`Dispose`, gated on `Backend.isDeviceBacked`. | HIGH | ~2 h |
+| 4 | ~~Check `al.GetError()` inside `guarded`~~ **DONE 2026-07-16** (§3.4). Querying `ALC_MONO_SOURCES` instead of the hard-coded 240 remains open. | HIGH | ~~~2 h~~ |
+| 5 | **Fill the device lane the gate already built** — real resolver + `sampleWav()`, driving `Play`/`PlayAt`/`PlayMusic`/`SetBusGain`/`Dispose`. **STARTED 2026-07-16**: §3.4's fix added the first real assertion (a device error code is named), which proved the lane works end-to-end. The rest of the device path is still type-tested only. | HIGH | ~1.5 h |
 | 6 | Fix the pan law to `dx / distance`. Add an off-axis-but-ahead test. | MED-HIGH | ~1 h |
 | 7 | Treat non-finite `seconds` as immediate in `fadeBus`/`crossFade`; make `applyCurve`'s clamp NaN-total. | MED | ~30 min |
 | 8 | Add `THIRD-PARTY-NOTICES.md`, pack into Host/Elmish, fix `README.md:13` dep table. | MED (legal) | ~1 h |
@@ -673,7 +717,7 @@ The existing `Engine.step` fuzz result (§2) shows the approach works: `step` is
 | 10 | Reconsider `crossFade`'s `EndG = 1.0` overriding the target bus's volume. | MED (design) | discuss |
 | 11 | Give `release.yml:56` gate.yml's device env + skip guard; add `--locked-mode` at `release.yml:122`. | LOW | ~20 min |
 | 12 | Fix `README.md:48-50`, `gate.yml:145-148`, `Host.fs:66-67` — all three describe behavior that isn't. | LOW | ~20 min |
-| 13 | Add `diff -r docs/api-surface src` to `gate.yml`; set or delete `ContinuousIntegrationBuild`. | LOW | ~20 min |
+| 13 | ~~Add `diff -r docs/api-surface src` to `gate.yml`~~ **WITHDRAWN — that finding was wrong** (§3.10): `EngineTests.fs:360` already gates it. Elmish was the one package it missed; **added 2026-07-16**. Set or delete `ContinuousIntegrationBuild` — still open. | LOW | ~5 min |
 | 14 | Add the three FsCheck property tests from §5; replace `EngineTests.fs:180`. | — | ~2 h |
 
 Items 1–4 are all in `src/`, total roughly a morning, and none require an audio device to fix or to
