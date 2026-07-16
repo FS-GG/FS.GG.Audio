@@ -6,7 +6,10 @@
     <PackageId>FS.GG.Audio.Engine</PackageId>
     <Version>$(FsGgAudioVersion)</Version>
     <Authors>FS-GG</Authors>
-    <Description>Mixing/voice layer over FS.GG.Audio.Host — named buses, linear/equal-power fades and cross-fades, side-chain ducking, and 3D listener/emitter positioning, realized through the IAudioBackend seam (IMixingBackend when available) with a deterministic device-free record path. Depends on FS.GG.Audio.Host/.Core only; never on FS.GG.UI.</Description>
+    <Description>Mixing/voice layer over FS.GG.Audio.Host — named buses, linear/equal-power fades and cross-fades, side-chain ducking, and 3D listener/emitter positioning, realized through the IAudioBackend seam (IMixingBackend when available) with a deterministic device-free record path. Depends on FS.GG.Audio.Host/.Core only; never on FS.GG.UI. Depends on FS.GG.Audio.Host, so it also redistributes the OpenAL Soft native library (LGPL-2.0-or-later) as a separate, dynamically-linked, replaceable shared library — see THIRD-PARTY-NOTICES.md in this package.</Description>
+    <!-- Transitive: the native arrives via FS.GG.Audio.Host, but it lands in a consumer's
+         output all the same, so the notice ships here too. -->
+    <RedistributesOpenAlNative>true</RedistributesOpenAlNative>
   </PropertyGroup>
 
   <ItemGroup>

@@ -228,6 +228,36 @@ jobs:
             fi
           done
 
+          # THE LGPL NOTICE MUST TRAVEL WITH THE BINARY (review 2026-07-16 §3.9).
+          #
+          # Host/Engine/Elmish redistribute the OpenAL Soft native (LGPL-2.0-or-later) while declaring
+          # PackageLicenseExpression=MIT. That is fine — the native is separate, dynamically linked and
+          # replaceable (DEC-001) — but only because the recipient is told, and the LGPL's terms for a
+          # work that merely uses the library turn on the telling. The notice going missing is not a
+          # cosmetic regression, and like the readme it would surface only at a tag cut, on the one
+          # artifact nobody re-reads before pushing it to nuget.org.
+          #
+          # Asserted in BOTH directions on purpose. Core must NOT carry it: Core has no native
+          # dependency (FR-006), so the notice would assert something false about it, and a licence
+          # notice that overclaims is its own kind of wrong. The absent case is also the one a
+          # copy-paste `<None Include>` into the wrong project silently breaks.
+          for id in FS.GG.Audio.Host FS.GG.Audio.Engine FS.GG.Audio.Elmish; do
+            pkg=$(echo ./artifacts/${id}.*.nupkg)
+            if ! unzip -l "$pkg" | grep -qE ' THIRD-PARTY-NOTICES\.md$'; then
+              echo "::error::${id}: redistributes the LGPL OpenAL Soft native but packs no THIRD-PARTY-NOTICES.md. The notice has to ship with the bytes it is about — see the RedistributesOpenAlNative property in Directory.Build.props."
+              exit 1
+            fi
+            if ! unzip -p "$pkg" "${id}.nuspec" | grep -q 'LGPL'; then
+              echo "::error::${id}: nuspec <description> does not mention the LGPL native. nuget.org shows the description, not the packed files, and it declares this package MIT."
+              exit 1
+            fi
+          done
+          if unzip -l ./artifacts/FS.GG.Audio.Core.*.nupkg | grep -qE ' THIRD-PARTY-NOTICES\.md$'; then
+            echo "::error::FS.GG.Audio.Core packs THIRD-PARTY-NOTICES.md, which says the package redistributes OpenAL Soft. Core has no native dependency (FR-006) and that claim is false — either Core grew one, which is a bigger problem, or the notice leaked into the wrong project."
+            exit 1
+          fi
+          echo "third-party notice ships with Host/Engine/Elmish; Core stays clean."
+
   # ── Cross-repo contract-coherence gate ──────────────────────────────────────────────────
   # Adopted per FS-GG/.github#519 (decision: yes, the framework repos call it). The gate lives
   # in FS-GG/.github and is CALLED, never copied — it asserts that the org registry is

@@ -6,7 +6,10 @@
     <PackageId>FS.GG.Audio.Elmish</PackageId>
     <Version>$(FsGgAudioVersion)</Version>
     <Authors>FS-GG</Authors>
-    <Description>Elmish Cmd authoring surface over FS.GG.Audio.Host/.Engine — Audio.Cmd.playSfx/playMusic/stopMusic/setMasterVolume produce Elmish commands that play straight through an IAudioBackend (no mixing), while Audio.Cmd.ofEngine routes a batch through FS.GG.Audio.Engine so bus volume, ducking, and 3D positioning apply. Depends on Elmish (MIT), never on FS.GG.UI.</Description>
+    <Description>Elmish Cmd authoring surface over FS.GG.Audio.Host/.Engine — Audio.Cmd.playSfx/playMusic/stopMusic/setMasterVolume produce Elmish commands that play straight through an IAudioBackend (no mixing), while Audio.Cmd.ofEngine routes a batch through FS.GG.Audio.Engine so bus volume, ducking, and 3D positioning apply. Depends on Elmish (MIT), never on FS.GG.UI. Depends on FS.GG.Audio.Host, so it also redistributes the OpenAL Soft native library (LGPL-2.0-or-later) as a separate, dynamically-linked, replaceable shared library — see THIRD-PARTY-NOTICES.md in this package.</Description>
+    <!-- Transitive: the native arrives via FS.GG.Audio.Host, but it lands in a consumer's
+         output all the same, so the notice ships here too. -->
+    <RedistributesOpenAlNative>true</RedistributesOpenAlNative>
   </PropertyGroup>
 
   <ItemGroup>

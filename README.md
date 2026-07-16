@@ -10,9 +10,16 @@ so audio is testable headless.
 | Package | What it is | Depends on |
 |---|---|---|
 | **FS.GG.Audio.Core** | Pure request vocabulary (`AudioEffect`, `Bus`, `SoundId`/`TrackId`) + a record-only interpreter (`AudioEvidence`). BCL-only. | FSharp.Core |
-| **FS.GG.Audio.Host** | The `IAudioBackend` device seam + a deterministic Null/record backend and a real OpenAL (Silk.NET) backend that degrades to Null with no device. Optional `IMixingBackend` for mixing/spatial control. | Core, Silk.NET.OpenAL |
-| **FS.GG.Audio.Engine** | Mixing/voice layer: named buses (Master/Music/Sfx/Ui/Ambient), linear fades + equal-power cross-fades, side-chain ducking, 3D listener/emitters. Pure deterministic `Engine.step`. | Host, Core |
-| **FS.GG.Audio.Elmish** | Thin Elmish `Cmd` authoring bridge (`Audio.Cmd.playSfx …`) over the host. Never depends on `FS.GG.UI`. | Host, Core, Elmish |
+| **FS.GG.Audio.Host** | The `IAudioBackend` device seam + a deterministic Null/record backend and a real OpenAL (Silk.NET) backend that degrades to Null with no device. Optional `IMixingBackend` for mixing/spatial control. | Core, Silk.NET.OpenAL, Silk.NET.OpenAL.Soft.Native † |
+| **FS.GG.Audio.Engine** | Mixing/voice layer: named buses (Master/Music/Sfx/Ui/Ambient), linear fades + equal-power cross-fades, side-chain ducking, 3D listener/emitters. Pure deterministic `Engine.step`. | Host †, Core |
+| **FS.GG.Audio.Elmish** | Thin Elmish `Cmd` authoring bridge (`Audio.Cmd.playSfx …`) over the host. Never depends on `FS.GG.UI`. | Host †, Core, Elmish |
+
+† **Redistributes the OpenAL Soft native library, which is LGPL-2.0-or-later** — as a separate,
+dynamically-linked, replaceable shared library, never linked into an FS.GG.Audio assembly (DEC-001).
+Restoring Host, Engine or Elmish puts `libopenal` into your output under `runtimes/<rid>/native/`.
+**FS.GG.Audio.Core carries no native code and no OpenAL**, if you need to avoid it entirely. See
+**[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)** for what ships, how to replace it, and how to
+exclude it.
 
 ```text
 GAME (pure update: Model -> Model * AudioEffect list)
@@ -70,3 +77,7 @@ Release. All four packages share one version (`<FsGgAudioVersion>` in `Directory
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+The FS.GG.Audio *source* is MIT. Host, Engine and Elmish additionally **redistribute** OpenAL Soft
+(LGPL-2.0-or-later) as a replaceable native library — see
+**[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)**. Core does not.

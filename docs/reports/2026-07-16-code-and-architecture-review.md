@@ -502,6 +502,32 @@ needs them.
 
 ### 3.9 MEDIUM (legal) — LGPL native ships inside an MIT-declared package
 
+> **Status: FIXED 2026-07-16.** `THIRD-PARTY-NOTICES.md` added and **packed into the nupkg** of every
+> package that redistributes the native, so the notice travels with the bytes it is about. Host's,
+> Engine's and Elmish's `<Description>` (what nuget.org actually renders) now name the LGPL native;
+> the root README's dependency table names `Silk.NET.OpenAL.Soft.Native`; Host's package README says
+> it too.
+>
+> **This finding understated the blast radius.** It said the exposure "widens to `FS.GG.Audio.Elmish`".
+> It widens to **`FS.GG.Audio.Engine` as well** — the lockfiles list the native as `CentralTransitive`
+> for *both*. Three of the four packages put `libopenal` into a consumer's output, not two. Only Core
+> is clean.
+>
+> Two facts confirmed that the finding did not have: the package declares `LGPL-2.0-or-later` **and**
+> `requireLicenseAcceptance = true`, and it ships prebuilt binaries for seven runtime identifiers.
+>
+> The notice is deliberately **not** packed into Core: Core has no native dependency (FR-006), so the
+> claim would be false, and a licence notice that overclaims is its own kind of wrong.
+>
+> Gated in `gate.yml` alongside the readme assertion, in **both** directions — the three must carry it
+> and mention LGPL in the nuspec; Core must not carry it. Verified against real `dotnet pack` output,
+> and mutation-verified: dropping the property from Engine drops the notice, and the gate fails.
+>
+> The content reflects the project's own recorded reasoning (DEC-001, `work/002-audio-host/charter.md`)
+> rather than inventing a rationale. It states facts and mechanism, and explicitly says it is not legal
+> advice — **a human should still review the wording before the next publish.**
+
+
 **`Directory.Packages.props:13-14`, `Directory.Build.props:60`, `src/FS.GG.Audio.Host/README.md`**
 
 `FS.GG.Audio.Host` stamps `<PackageLicenseExpression>MIT</PackageLicenseExpression>` and pulls
@@ -739,7 +765,7 @@ The existing `Engine.step` fuzz result (§2) shows the approach works: `step` is
 | 5 | **Fill the device lane the gate already built** — real resolver + `sampleWav()`, driving `Play`/`PlayAt`/`PlayMusic`/`SetBusGain`/`Dispose`. **STARTED 2026-07-16**: §3.4's fix added the first real assertion (a device error code is named), which proved the lane works end-to-end. The rest of the device path is still type-tested only. | HIGH | ~1.5 h |
 | 6 | ~~Fix the pan law to `dx / distance`. Add an off-axis-but-ahead test.~~ **DONE 2026-07-16** (§3.5). Also fixed a `nan` `Pan` found in the process, and corrected §2's overstated fuzz claim. | MED-HIGH | ~~~1 h~~ |
 | 7 | Treat non-finite `seconds` as immediate in `fadeBus`/`crossFade`; make `applyCurve`'s clamp NaN-total. | MED | ~30 min |
-| 8 | Add `THIRD-PARTY-NOTICES.md`, pack into Host/Elmish, fix `README.md:13` dep table. | MED (legal) | ~1 h |
+| 8 | ~~Add `THIRD-PARTY-NOTICES.md`, pack into Host/Elmish, fix `README.md:13` dep table.~~ **DONE 2026-07-16** (§3.9) — and into **Engine** too, which the finding missed. Gated both directions. Wording still wants a human/legal read. | MED (legal) | ~~~1 h~~ |
 | 9 | Document the single-thread contract on `Engine.T`, `IAudioBackend`, `Cmd.ofEngine`. | MED | ~30 min |
 | 10 | Reconsider `crossFade`'s `EndG = 1.0` overriding the target bus's volume. | MED (design) | discuss |
 | 11 | Give `release.yml:56` gate.yml's device env + skip guard; add `--locked-mode` at `release.yml:122`. | LOW | ~20 min |

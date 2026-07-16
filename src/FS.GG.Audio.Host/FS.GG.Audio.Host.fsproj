@@ -6,7 +6,9 @@
     <PackageId>FS.GG.Audio.Host</PackageId>
     <Version>$(FsGgAudioVersion)</Version>
     <Authors>FS-GG</Authors>
-    <Description>Host-side playback for FS.GG.Audio.Core — a pluggable IAudioBackend with a deterministic Null/record backend and a real OpenAL (Silk.NET) device backend that degrades to Null when no device is present.</Description>
+    <Description>Host-side playback for FS.GG.Audio.Core — a pluggable IAudioBackend with a deterministic Null/record backend and a real OpenAL (Silk.NET) device backend that degrades to Null when no device is present. Redistributes the OpenAL Soft native library (LGPL-2.0-or-later) as a separate, dynamically-linked, replaceable shared library — see THIRD-PARTY-NOTICES.md in this package.</Description>
+    <!-- Direct: this project references Silk.NET.OpenAL.Soft.Native itself. -->
+    <RedistributesOpenAlNative>true</RedistributesOpenAlNative>
   </PropertyGroup>
 
   <ItemGroup>

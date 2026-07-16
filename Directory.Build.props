@@ -74,6 +74,32 @@
     <None Include="$(MSBuildProjectDirectory)/README.md" Pack="true" PackagePath="\" Visible="false" />
   </ItemGroup>
 
+  <!-- THE LGPL NOTICE HAS TO TRAVEL WITH THE BINARY (review 2026-07-16 §3.9).
+       ================================================================
+       `Silk.NET.OpenAL.Soft.Native` is LGPL-2.0-or-later (and requireLicenseAcceptance=true), and it
+       puts an OpenAL Soft shared library into the output of every project that restores it. Our
+       packages stamp PackageLicenseExpression=MIT. That combination is fine — the native is a
+       separate, dynamically-linked, replaceable library, which is the whole point of DEC-001 — but it
+       is only fine if the recipient is TOLD, and the LGPL's terms for a work that merely uses the
+       library turn on exactly that telling.
+
+       The analysis existed and was sound. It lived in Directory.Packages.props and work/002-audio-host/,
+       where no consumer will ever read it: the charter reasons explicitly about "the LGPL-clean path
+       for closed-source games", which is precisely the reader who needed it and precisely the one who
+       could not get it. This packs THIRD-PARTY-NOTICES.md into the nupkg so the notice arrives with
+       the bytes it is about.
+
+       Opt-IN per project, via $(RedistributesOpenAlNative), rather than a blanket include: the notice
+       says "this package redistributes OpenAL Soft", and that is FALSE of FS.GG.Audio.Core, which has
+       no native dependency at all (FR-006). A licence notice that overclaims is its own kind of wrong,
+       and Core's freedom from the native is a property worth not muddying. Host declares it directly;
+       Engine and Elmish inherit the native transitively through Host, so they redistribute it just as
+       surely and say so too. -->
+  <ItemGroup Label="third-party-notices"
+             Condition="'$(RedistributesOpenAlNative)' == 'true' And '$(IsPackable)' != 'false'">
+    <None Include="$(MSBuildThisFileDirectory)THIRD-PARTY-NOTICES.md" Pack="true" PackagePath="\" Visible="false" />
+  </ItemGroup>
+
   <!-- Pack each project's own .fsi into its nupkg under api-surface/ (cross-repo Audio#106):
        FS.GG.Rendering retires its hand-copied scaffold API mirror (#694) by GENERATING it from the
        PINNED package a scaffolded product restores. Four mirror files (Audio.Core/Audio.fsi,

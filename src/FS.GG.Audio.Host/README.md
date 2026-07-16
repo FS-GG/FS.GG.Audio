@@ -112,3 +112,15 @@ vacuous green, one level up.
 ## License
 
 MIT — see [LICENSE](https://github.com/FS-GG/FS.GG.Audio/blob/main/LICENSE).
+
+**This package redistributes the OpenAL Soft native library, which is LGPL-2.0-or-later.** The
+FS.GG.Audio source is MIT; OpenAL Soft is not, and restoring this package places `libopenal` into
+your output under `runtimes/<rid>/native/`.
+
+It ships as a **separate, dynamically-linked, replaceable** shared library — never linked into an
+FS.GG.Audio assembly — which is the deliberate design (DEC-001) that keeps the component usable by
+closed-source games. You can substitute your own OpenAL, or drop the native and let
+`OpenAlBackend.create` degrade to the Null backend. `FS.GG.Audio.Core` has no native dependency at
+all if you need to avoid it entirely.
+
+See **THIRD-PARTY-NOTICES.md** (included in this package) for the full notice.
