@@ -824,6 +824,138 @@ let tests =
                     a.Dispose()
             })
 
+        // THE DEVICE LANE'S MISSING ASSERTIONS (report §5). The gate has opened a real OpenAL device
+        // since #42 and then asked it a compile-time type question; everything below the seam —
+        // buffer upload, bufferFormat, source configuration, the pan mapping's contract with the
+        // hardware — ran on every CI run and was checked by nothing.
+        //
+        // These read device state back. The test project sees Silk.NET transitively through Host, and
+        // the backend re-asserts its context before every call (#124), so on return its sources are
+        // the current context's and are addressable. Sequenced: context currency is process-wide.
+        testSequenced (
+            test "a 3D voice reaches the device with the distance model OFF and the gain we asked for (report §5)" {
+                // `configureAndPlay` sets SourceRelative=true and RolloffFactor=0.0, and that pair is
+                // the ENTIRE premise `Spatial.panToPosition` rests on: the Engine has already folded
+                // distance attenuation into the gain, so the device must not attenuate a second time,
+                // and the position must be read as a pure direction. `panToPosition` is tested five
+                // ways as a pure function; its contract with the hardware was tested zero ways —
+                // delete `RolloffFactor = 0` and every test in this repo still passed while every 3D
+                // voice was silently double-attenuated.
+                let resolver =
+                    { ResolveSound = (fun _ -> Some(sampleWav ()))
+                      ResolveTrack = (fun _ -> None) }
+                let backend = OpenAlBackend.create resolver
+                try
+                    match Backend.kindOf backend with
+                    | BackendKind.DeviceBacked ->
+                        let mixing = backend :?> IMixingBackend
+                        mixing.PlayAt(SoundId "boom", 0.5, 1.0) // hard right, half gain
+                        let al = Silk.NET.OpenAL.AL.GetApi(false)
+                        let sources = [ for h in 1u..256u do if al.IsSource h then yield h ]
+                        let src =
+                            match sources with
+                            | [ one ] -> one
+                            | many -> failtestf "expected exactly one pooled source after one PlayAt, got %A" many
+
+                        let mutable relative = false
+                        let mutable rolloff = 1.0f
+                        let mutable gain = 0.0f
+                        let mutable px, py, pz = 0.0f, 0.0f, 0.0f
+                        al.GetSourceProperty(src, Silk.NET.OpenAL.SourceBoolean.SourceRelative, &relative)
+                        al.GetSourceProperty(src, Silk.NET.OpenAL.SourceFloat.RolloffFactor, &rolloff)
+                        al.GetSourceProperty(src, Silk.NET.OpenAL.SourceFloat.Gain, &gain)
+                        al.GetSourceProperty(src, Silk.NET.OpenAL.SourceVector3.Position, &px, &py, &pz)
+
+                        Expect.isTrue relative "the source is listener-relative, so its position reads as a direction"
+                        Expect.equal rolloff 0.0f "the device's own distance model is OFF — the Engine already attenuated"
+                        Expect.floatClose Accuracy.high (float gain) 0.5 "the gain we passed is the gain the device holds, un-attenuated"
+                        // And the pure mapping is the one the hardware actually got.
+                        let (ex, ey, ez) = Spatial.panToPosition 1.0
+                        Expect.floatClose Accuracy.high (float px) ex "x matches Spatial.panToPosition"
+                        Expect.floatClose Accuracy.high (float py) ey "y matches Spatial.panToPosition"
+                        Expect.floatClose Accuracy.high (float pz) ez "z matches Spatial.panToPosition"
+                    | kind -> skiptest (sprintf "no OpenAL device (%A) — nothing to read device state off." kind)
+                finally
+                    backend.Dispose()
+            })
+
+        testSequenced (
+            test "a real WAV is uploaded to a device buffer with the format it declared (report §5)" {
+                // `bufferFormat` maps channels/bits -> BufferFormat and was covered by nothing: a
+                // Mono8 <-> Stereo8 transposition would ship, and would not error — it would just
+                // play at the wrong rate/width. `sampleWav()` existed and was fed only to
+                // `Wav.tryParse`, never to a backend, so no buffer was ever uploaded on any CI run.
+                let resolver =
+                    { ResolveSound = (fun _ -> Some(sampleWav ()))
+                      ResolveTrack = (fun _ -> None) }
+                let backend = OpenAlBackend.create resolver
+                try
+                    match Backend.kindOf backend with
+                    | BackendKind.DeviceBacked ->
+                        backend.Play(CoreAudio.playSfx (SoundId "boom") 1.0)
+                        let al = Silk.NET.OpenAL.AL.GetApi(false)
+                        let buffers = [ for h in 1u..256u do if al.IsBuffer h then yield h ]
+                        let buf =
+                            match buffers with
+                            | [ one ] -> one
+                            | many -> failtestf "expected exactly one uploaded buffer, got %A" many
+                        let mutable channels = 0
+                        let mutable bits = 0
+                        let mutable freq = 0
+                        al.GetBufferProperty(buf, Silk.NET.OpenAL.GetBufferInteger.Channels, &channels)
+                        al.GetBufferProperty(buf, Silk.NET.OpenAL.GetBufferInteger.Bits, &bits)
+                        al.GetBufferProperty(buf, Silk.NET.OpenAL.GetBufferInteger.Frequency, &freq)
+                        // sampleWav() is mono/16-bit/44100 — the device must agree, or bufferFormat
+                        // picked the wrong BufferFormat and the asset plays as garbage.
+                        Expect.equal channels 1 "the device holds a MONO buffer, as the WAV declared"
+                        Expect.equal bits 16 "... 16-bit"
+                        Expect.equal freq 44100 "... at 44.1kHz"
+                    | kind -> skiptest (sprintf "no OpenAL device (%A) — no buffer to inspect." kind)
+                finally
+                    backend.Dispose()
+            })
+
+        testSequenced (
+            test "the whole device path runs clean against a real device (report §5)" {
+                // Broad rather than deep, and only meaningful because of #116: every AL call is now
+                // error-checked, so "no fault reported" is a real claim about every leg below —
+                // upload, GenSource, the pooled play, the music source and its reuse across tracks,
+                // the bus-gain push, StopMusic, and Dispose. Before #116 this assertion would have
+                // been vacuous: OpenAL sets a code, throws nothing, and the old guard called
+                // Succeeded.
+                let resolver =
+                    { ResolveSound = (fun _ -> Some(sampleWav ()))
+                      ResolveTrack = (fun _ -> Some(sampleWav ())) }
+                let backend = OpenAlBackend.create resolver
+                match Backend.kindOf backend with
+                | BackendKind.DeviceBacked ->
+                    let mixing = backend :?> IMixingBackend
+                    let original = System.Console.Error
+                    use captured = new System.IO.StringWriter()
+                    System.Console.SetError captured
+                    try
+                        backend.Play(CoreAudio.playSfx (SoundId "s") 1.0)
+                        mixing.PlayAt(SoundId "s", 0.7, -0.5)
+                        mixing.PlayAt(SoundId "other", 0.3, 0.0)
+                        backend.Play(CoreAudio.playMusic (TrackId "bgm") true)
+                        mixing.SetBusGain(Music, 0.4) // reaches the live music source
+                        mixing.SetBusGain(Master, 0.8)
+                        mixing.SetListener(1.0, 0.0, -2.0)
+                        backend.Play(CoreAudio.playMusic (TrackId "bgm2") false) // reuses the music source (#20)
+                        backend.Play CoreAudio.stopMusic
+                        backend.Play(CoreAudio.setMasterVolume 0.5)
+                        backend.Dispose()
+                    finally
+                        System.Console.SetError original
+                    let text = captured.ToString()
+                    Expect.isFalse
+                        (text.Contains "the audio device failed on")
+                        (sprintf "the device path must execute cleanly end to end — it reported: %s" (text.Trim()))
+                | kind ->
+                    backend.Dispose()
+                    skiptest (sprintf "no OpenAL device (%A) — there is no device path to run." kind)
+            })
+
         test "DeviceDiagnostics.message names the operation, the degrade, and the way back (#33)" {
             let error = System.InvalidOperationException "AL_INVALID_OPERATION" :> exn
 

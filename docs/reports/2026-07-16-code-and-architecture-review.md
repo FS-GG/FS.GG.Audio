@@ -760,6 +760,31 @@ OpenAl` (`Host.fs:504-790`) is **160 code lines = 34% of Host**, and gets **two 
 
 ### The device lane is built but not filled
 
+> **Status: FILLED 2026-07-16.** The lane now asserts three things about a real device, and the two
+> failures this section named as undetectable are both detected — mutation-verified:
+> deleting `RolloffFactor = 0` fails *"the device's own distance model is OFF"*; transposing
+> `Mono16`→`Stereo16` in `bufferFormat` fails *"the device holds a MONO buffer"*.
+>
+> 1. **The spatial contract at the hardware.** `PlayAt` → the source is read back off the device:
+>    `SourceRelative = true`, `RolloffFactor = 0`, `Gain` is the gain we passed (not attenuated a
+>    second time), and `Position` equals `Spatial.panToPosition` of the pan. That ties the pure
+>    function — tested five ways — to the hardware contract it rests on, which was tested zero ways.
+> 2. **A real WAV is uploaded**, and the device agrees it is mono/16-bit/44100. `sampleWav()` had
+>    existed all along and was fed only to `Wav.tryParse`; no buffer was ever uploaded on any CI run.
+> 3. **The whole path runs clean** — upload, pooled play, `PlayAt`, music start, bus-gain push to the
+>    live music source, music source reuse across tracks, `StopMusic`, `SetMasterVolume`, `Dispose` —
+>    with no device fault reported. **Only meaningful because of §3.4**: before the `alGetError` check
+>    this assertion would have been vacuous, since OpenAL sets a code, throws nothing, and the old
+>    guard called `Succeeded`.
+>
+> Reading device state back is possible because the test project sees Silk.NET transitively through
+> Host, and because each backend re-asserts its context per call (§3.8) — so on return its sources are
+> the current context's and are addressable.
+>
+> Still type-tested only: the #20 voice-ceiling steal at a real device (its logic is covered headless
+> through the `VoicePool` fake), and the #28 asset-diagnostic legs beyond `Unresolved`.
+
+
 Both "device present" tests pass a resolver returning `None` for everything (`HostTests.fs:172-173`,
 `:211-212`) and then assert `backend :? IMixingBackend` (`:187`, `:217`) — a **static type fact**,
 true at compile time, unfalsifiable unless someone deletes an interface declaration. `sampleWav()`
@@ -835,7 +860,7 @@ The existing `Engine.step` fuzz result (§2) shows the approach works: `step` is
 | 2 | ~~Validate `wFormatTag` at `body+0`; reject non-PCM via the existing `UnsupportedFormat` leg.~~ **DONE 2026-07-16** — but *not* as recommended: `UnsupportedFormat` would have lied, and a blunt tag check would have silenced valid `WAVE_FORMAT_EXTENSIBLE` PCM. See §3.2. | HIGH | ~~~30 min~~ |
 | 3 | ~~Make `NullBackend` accumulate in a `ResizeArray`; add a bound or reset.~~ **PARTLY DONE 2026-07-16** — quadratic gone, `Clear()` added. Retention on the FR-004 degrade path remains and needs an owner decision (§3.3, §4c). | HIGH | ~~~1 h~~ |
 | 4 | ~~Check `al.GetError()` inside `guarded`~~ **DONE 2026-07-16** (§3.4). Querying `ALC_MONO_SOURCES` instead of the hard-coded 240 remains open. | HIGH | ~~~2 h~~ |
-| 5 | **Fill the device lane the gate already built** — real resolver + `sampleWav()`, driving `Play`/`PlayAt`/`PlayMusic`/`SetBusGain`/`Dispose`. **STARTED 2026-07-16**: §3.4's fix added the first real assertion (a device error code is named), which proved the lane works end-to-end. The rest of the device path is still type-tested only. | HIGH | ~1.5 h |
+| 5 | ~~**Fill the device lane the gate already built**~~ **DONE 2026-07-16** (§5). Three real assertions: the spatial contract read back off the hardware, a real WAV uploaded at the right format, and the whole path clean end-to-end. Both failures this report named as undetectable are now mutation-verified as detected. | HIGH | ~~~1.5 h~~ |
 | 6 | ~~Fix the pan law to `dx / distance`. Add an off-axis-but-ahead test.~~ **DONE 2026-07-16** (§3.5). Also fixed a `nan` `Pan` found in the process, and corrected §2's overstated fuzz claim. | MED-HIGH | ~~~1 h~~ |
 | 7 | ~~Treat non-finite `seconds` as immediate in `fadeBus`/`crossFade`~~ **DONE 2026-07-16** (§3.6) — but **not as recommended**: folding `+infinity` in would silence the music instantly. `nan` only. | MED | ~~~30 min~~ |
 | 8 | ~~Add `THIRD-PARTY-NOTICES.md`, pack into Host/Elmish, fix `README.md:13` dep table.~~ **DONE 2026-07-16** (§3.9) — and into **Engine** too, which the finding missed. Gated both directions. Wording still wants a human/legal read. | MED (legal) | ~~~1 h~~ |
