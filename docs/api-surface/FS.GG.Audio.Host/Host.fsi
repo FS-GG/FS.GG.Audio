@@ -71,15 +71,36 @@ type BackendKind =
 [<RequireQualifiedAccess>]
 module Wav =
 
-    /// Decoded PCM payload of a WAV file.
+    /// The `wFormatTag` of uncompressed PCM — the only codec whose bytes mean, to OpenAL's
+    /// `BufferData`, what `BufferData` assumes they mean. Compare `PcmData.FormatTag` against this
+    /// before treating a parsed WAV as playable.
+    [<Literal>]
+    val FormatPcm: int = 1
+
+    /// Decoded payload of a WAV file.
     type PcmData =
-        { Channels: int
+        { /// The `wFormatTag` from the `fmt ` chunk: which codec `Data` is actually in.
+          /// `FormatPcm` (1) is the only one this component can play — see `tryParse`.
+          ///
+          /// Already resolved through `WAVE_FORMAT_EXTENSIBLE` (0xFFFE): a PCM file written in the
+          /// extensible form — routine for multichannel exports — reports `FormatPcm` here, not
+          /// 0xFFFE. It stays 0xFFFE only when the subformat GUID could not be read at all, which is
+          /// not a claim that the file is PCM.
+          FormatTag: int
+          Channels: int
           BitsPerSample: int
           SampleRate: int
           Data: byte[] }
 
-    /// Parse a minimal PCM WAV (RIFF/WAVE, fmt + data chunks). Total; returns None on anything
-    /// it does not understand rather than throwing.
+    /// Parse a minimal WAV (RIFF/WAVE, fmt + data chunks). Total; returns None on anything it does
+    /// not understand rather than throwing, and terminates on any input — including a corrupt chunk
+    /// size, which once made the walk spin forever.
+    ///
+    /// A STRUCTURAL parse: it reports what the header says and decides nothing about playability. A
+    /// `Some` therefore does NOT mean the file can be played — a 5-channel 32-bit WAV parses here,
+    /// and so does an IEEE-float one. Check `FormatTag` against `FormatPcm` before trusting `Data`
+    /// to be PCM; the bundled OpenAL backend does, and reports `AssetDiagnostics.UnsupportedCodec`
+    /// when it is not.
     val tryParse: bytes: byte[] -> PcmData option
 
 /// Public contract module. The pure pan -> source-position mapping the OpenAL backend spatializes
@@ -164,18 +185,29 @@ module VoicePool =
 [<RequireQualifiedAccess>]
 module AssetDiagnostics =
 
-    /// Why an id produced no playable buffer. Three distinct fixes, so the diagnostic names which
-    /// one rather than just reporting silence.
+    /// Why an id produced no playable buffer. Distinct fixes, so the diagnostic names which one
+    /// rather than just reporting silence.
     type Failure =
         /// The product's `AssetResolver` returned `None` — the id names nothing the product could
         /// hand over. The headline case: a typo'd id, or an asset that was never shipped.
         | Unresolved
-        /// Bytes came back, but they are not a PCM WAV `Wav.tryParse` understands. An authoring or
+        /// Bytes came back, but they are not a WAV `Wav.tryParse` can read at all. An authoring or
         /// export problem, not a missing file.
         | NotWav of bytes: int
         /// A WAV that parsed, whose channel/bit-depth pair has no OpenAL buffer format — only
         /// 8-/16-bit mono and stereo do. A conversion problem.
         | UnsupportedFormat of channels: int * bitsPerSample: int
+        /// A WAV that parsed, in a codec that is not uncompressed PCM (IEEE-float, ADPCM, A-law,
+        /// MP3-in-WAV, …). Carries the `wFormatTag`, resolved through `WAVE_FORMAT_EXTENSIBLE`.
+        ///
+        /// Its own case rather than a reuse of `UnsupportedFormat`, which reports channels and bits:
+        /// mono 16-bit IMA-ADPCM has a channel/bit pair OpenAL supports perfectly well, so that
+        /// message would misname the cause and send the reader to re-export at a bit depth that was
+        /// never the problem. The bytes are wrong, not their shape.
+        ///
+        /// The one failure in this component whose degrade is not merely silence-instead-of-sound:
+        /// before it was checked, these bytes were uploaded AS PCM and played as noise.
+        | UnsupportedCodec of formatTag: int
 
     /// The asset that failed, carrying the product's own id — the only handle the host has on it.
     type Asset =

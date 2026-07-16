@@ -17,14 +17,13 @@ type private RecordingBackend() =
         member _.Play(e) = calls.Add e
         member _.Dispose() = ()
 
-// A tiny valid mono/16-bit PCM WAV (2 sample frames) for the WAV-parser test.
-let private sampleWav () : byte[] =
+// A tiny valid WAV (2 sample frames) in a caller-chosen codec/shape, for the WAV-parser tests.
+// `formatTag` is the one field that used to go unread — hence a knob for it.
+let private wavWith (formatTag: int16) (channels: int16) (bits: int16) : byte[] =
     use ms = new System.IO.MemoryStream()
     use w = new System.IO.BinaryWriter(ms)
     let data = [| 0uy; 0uy; 1uy; 0uy |]
-    let channels = 1s
     let rate = 44100
-    let bits = 16s
     let byteRate = rate * int channels * int bits / 8
     let blockAlign = int16 (int channels * int bits / 8)
     w.Write(System.Text.Encoding.ASCII.GetBytes "RIFF")
@@ -32,12 +31,49 @@ let private sampleWav () : byte[] =
     w.Write(System.Text.Encoding.ASCII.GetBytes "WAVE")
     w.Write(System.Text.Encoding.ASCII.GetBytes "fmt ")
     w.Write(16)
-    w.Write(1s) // PCM
+    w.Write(formatTag)
     w.Write(channels)
     w.Write(rate)
     w.Write(byteRate)
     w.Write(blockAlign)
     w.Write(bits)
+    w.Write(System.Text.Encoding.ASCII.GetBytes "data")
+    w.Write(data.Length)
+    w.Write(data)
+    w.Flush()
+    ms.ToArray()
+
+// A tiny valid mono/16-bit PCM WAV (2 sample frames) for the WAV-parser test.
+let private sampleWav () : byte[] = wavWith 1s 1s 16s
+
+// The same mono/16-bit PCM payload written in the WAVE_FORMAT_EXTENSIBLE form: wFormatTag is 0xFFFE
+// and the real codec lives in a SubFormat GUID whose first four bytes are the tag it stands for.
+// This is an ORDINARY, playable PCM file — the form any multichannel export takes, and plenty of
+// stereo ones — which is exactly why the codec check has to resolve the subformat instead of
+// rejecting the marker.
+let private extensiblePcmWav () : byte[] =
+    use ms = new System.IO.MemoryStream()
+    use w = new System.IO.BinaryWriter(ms)
+    let data = [| 0uy; 0uy; 1uy; 0uy |]
+    w.Write(System.Text.Encoding.ASCII.GetBytes "RIFF")
+    w.Write(60 + data.Length)
+    w.Write(System.Text.Encoding.ASCII.GetBytes "WAVE")
+    w.Write(System.Text.Encoding.ASCII.GetBytes "fmt ")
+    w.Write(40) // 16 + cbSize(22), word-aligned
+    w.Write(0xFFFEs) // wFormatTag = WAVE_FORMAT_EXTENSIBLE (as a signed Int16 this reads -2)
+    w.Write(1s)
+    w.Write(44100)
+    w.Write(88200)
+    w.Write(2s)
+    w.Write(16s)
+    w.Write(22s) // cbSize
+    w.Write(16s) // wValidBitsPerSample
+    w.Write(4) // dwChannelMask
+    // KSDATAFORMAT_SUBTYPE_PCM = 00000001-0000-0010-8000-00AA00389B71
+    w.Write(1)
+    w.Write(0s)
+    w.Write(0x10s)
+    w.Write([| 0x80uy; 0x00uy; 0x00uy; 0xAAuy; 0x00uy; 0x38uy; 0x9Buy; 0x71uy |])
     w.Write(System.Text.Encoding.ASCII.GetBytes "data")
     w.Write(data.Length)
     w.Write(data)
@@ -274,6 +310,135 @@ let tests =
             Expect.isNone
                 (Wav.tryParse (System.Text.Encoding.ASCII.GetBytes "NOTAWAVEFILE...."))
                 "bad header -> None"
+        }
+
+        // Both cases above return at the length/magic guard, BEFORE the chunk loop is entered — so
+        // the walk itself had no malformed-input coverage at all, and a hang lived there. A chunk
+        // size is unsigned on disk and signed once read: the advance `8 + sz + (sz &&& 1)` is exactly
+        // 0 for sz = -8 and sz = -9, so `pos` stopped moving and tryParse spun forever. The `try`
+        // inside it cannot catch that — a hang is not an exception.
+        //
+        // Assert TERMINATION, not just the return value. A regression here must fail this test in
+        // seconds; left to `Expect.isNone` alone it would wedge the whole CI run with no clue which
+        // test did it, which is the failure mode that hid the bug in the first place.
+        test "Wav.tryParse terminates on a corrupt chunk size, never spins (FR-005)" {
+            let riffWith (size: int) =
+                let b = Array.zeroCreate<byte> 64
+                System.Text.Encoding.ASCII.GetBytes("RIFF").CopyTo(b, 0)
+                System.BitConverter.GetBytes(56).CopyTo(b, 4)
+                System.Text.Encoding.ASCII.GetBytes("WAVE").CopyTo(b, 8)
+                System.Text.Encoding.ASCII.GetBytes("junk").CopyTo(b, 12)
+                System.BitConverter.GetBytes(size).CopyTo(b, 16)
+                b
+            // -8 and -9 are the two sizes that advance by exactly zero. The rest bracket them, and
+            // Int32.MaxValue covers the other end, where `body + sz` used to overflow `pos` negative
+            // and the parser survived only because `ascii` then threw into the catch.
+            for size in [ -9; -8; -7; -1; 0; System.Int32.MinValue; System.Int32.MaxValue ] do
+                let parse = System.Threading.Tasks.Task.Run(fun () -> Wav.tryParse (riffWith size))
+                if not (parse.Wait(System.TimeSpan.FromSeconds 5.0)) then
+                    failtestf "Wav.tryParse did not terminate on a chunk size of %d — it is spinning" size
+                Expect.isNone parse.Result (sprintf "a chunk size of %d is malformed -> None" size)
+        }
+
+        // wFormatTag went unread for the life of this reader, and the omission was the one bug in the
+        // component whose degrade was NOISE rather than silence: an IEEE-float or ADPCM file has
+        // plausible channels/bits, so it passed `bufferFormat` and was uploaded as raw PCM.
+        test "Wav.tryParse reports the codec, so non-PCM is not decoded as PCM (FR-005)" {
+            let tagOf (bytes: byte[]) =
+                match Wav.tryParse bytes with
+                | Some pcm -> pcm.FormatTag
+                | None -> failtest "expected a structurally valid WAV to parse"
+            // Structural parse: these ARE well-formed WAVs and still parse. What changed is that the
+            // codec now comes back with them, so `uploadBuffer` can refuse them by name.
+            Expect.equal (tagOf (sampleWav ())) Wav.FormatPcm "plain PCM reports FormatPcm"
+            Expect.equal (tagOf (wavWith 3s 1s 32s)) 3 "IEEE-float reports its own tag, not PCM"
+            Expect.equal (tagOf (wavWith 0x11s 1s 16s)) 0x11 "IMA-ADPCM reports its own tag, not PCM"
+            Expect.equal (tagOf (wavWith 0x55s 2s 16s)) 0x55 "MP3-in-WAV reports its own tag, not PCM"
+            // The one that matters most: mono 16-bit ADPCM has a channel/bit pair OpenAL supports, so
+            // the codec is the ONLY thing standing between those bytes and a burst of static.
+            Expect.notEqual (tagOf (wavWith 0x11s 1s 16s)) Wav.FormatPcm "mono 16-bit ADPCM is not PCM"
+        }
+
+        test "Wav.tryParse resolves WAVE_FORMAT_EXTENSIBLE to its subformat, so PCM still plays (FR-005)" {
+            // The regression this guards is worse than the bug it accompanies. Extensible PCM is
+            // ordinary, playable audio that parses correctly today; a codec check that rejected
+            // `tag <> 1` outright would turn every such asset SILENT — trading noise-on-bad-files for
+            // silence-on-good-ones. 0xFFFE is also negative read as Int16, so a signed read would
+            // misreport it here too.
+            match Wav.tryParse (extensiblePcmWav ()) with
+            | Some pcm ->
+                Expect.equal pcm.FormatTag Wav.FormatPcm "extensible PCM resolves to FormatPcm, not 0xFFFE"
+                Expect.equal pcm.Channels 1 "mono survives the extensible header"
+                Expect.equal pcm.BitsPerSample 16 "16-bit survives the extensible header"
+                Expect.equal pcm.Data.Length 4 "the data chunk is found past the longer fmt chunk"
+            | None -> failtest "expected an extensible PCM WAV to parse — it is valid, playable audio"
+        }
+
+        test "Wav.tryParse will not read a subformat the fmt chunk never carried (FR-005)" {
+            // A file declaring EXTENSIBLE with a SHORT (16-byte) fmt chunk supplies no subformat GUID.
+            // Offset 24 of that chunk is not a GUID — it is whatever chunk follows, i.e. the audio
+            // samples. Bounds-checking the read against the FILE length is not enough: it is in
+            // bounds and still meaningless. Here the data is crafted to begin `01 00 00 00`, so a
+            // reader that trusts the file length alone finds "PCM" in the sample data, uploads these
+            // bytes as PCM, and hands back the exact noise bug the codec check exists to prevent.
+            let shortExtensible () =
+                use ms = new System.IO.MemoryStream()
+                use w = new System.IO.BinaryWriter(ms)
+                let data = Array.append (System.BitConverter.GetBytes 1) (Array.zeroCreate 28)
+                w.Write(System.Text.Encoding.ASCII.GetBytes "RIFF")
+                w.Write(36 + data.Length)
+                w.Write(System.Text.Encoding.ASCII.GetBytes "WAVE")
+                w.Write(System.Text.Encoding.ASCII.GetBytes "fmt ")
+                w.Write(16) // a 16-byte fmt chunk: no cbSize, no subformat
+                w.Write(0xFFFEs) // ... yet it claims EXTENSIBLE
+                w.Write(1s)
+                w.Write(44100)
+                w.Write(88200)
+                w.Write(2s)
+                w.Write(16s)
+                w.Write(System.Text.Encoding.ASCII.GetBytes "data")
+                w.Write(data.Length)
+                w.Write(data)
+                w.Flush()
+                ms.ToArray()
+            match Wav.tryParse (shortExtensible ()) with
+            | Some pcm ->
+                Expect.notEqual
+                    pcm.FormatTag
+                    Wav.FormatPcm
+                    "a subformat that was never carried must not be read out of the sample data as PCM"
+                Expect.equal pcm.FormatTag 0xFFFE "the codec is unknown, and says so, rather than guessing"
+            | None -> () // rejecting it outright is also a correct answer
+        }
+
+        test "AssetDiagnostics names the codec and the fix, and does not misreport it as a bit depth (#28)" {
+            let msg =
+                AssetDiagnostics.message
+                    (AssetDiagnostics.Sound(SoundId "boom"))
+                    (AssetDiagnostics.UnsupportedCodec 0x11)
+            Expect.stringContains msg "boom" "names the product's own id"
+            Expect.stringContains msg "IMA-ADPCM" "names the codec, not just a number"
+            Expect.stringContains msg "PCM" "names the fix: re-export as PCM"
+            // The reason this is its own Failure case. UnsupportedFormat would have said "1-channel
+            // 16-bit WAV, which OpenAL has no buffer format for" — false, OpenAL has Mono16 — and
+            // sent the reader to change a bit depth that was never the problem.
+            Expect.isFalse
+                (msg.Contains "no buffer format")
+                "must not blame the channel/bit pair for what the codec did"
+        }
+
+        test "Wav.tryParse keeps a complete fmt+data that precedes a corrupt trailing chunk (FR-005)" {
+            // Pins the decision the guard above encodes: a bad size stops the walk rather than
+            // discarding what was already read, so an asset whose audio is fully readable before some
+            // trailing garbage still plays. The alternative (None on any corruption anywhere) would
+            // silently drop files that are fine — a stricter parser, and a worse one.
+            let wav = sampleWav ()
+            let corrupt = Array.append wav (Array.zeroCreate 8)
+            System.Text.Encoding.ASCII.GetBytes("LIST").CopyTo(corrupt, wav.Length)
+            System.BitConverter.GetBytes(-8).CopyTo(corrupt, wav.Length + 4)
+            match Wav.tryParse corrupt with
+            | Some pcm -> Expect.equal pcm.Data.Length 4 "the good data chunk ahead of the corruption still parses"
+            | None -> failtest "expected the leading fmt+data to survive a corrupt trailing chunk"
         }
 
         // --- #20: the WAV-cache and voice-reclaim seams, unit-tested without a device. ---

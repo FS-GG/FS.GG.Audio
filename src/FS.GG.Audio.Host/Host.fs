@@ -57,14 +57,36 @@ module CoreAudio = FS.GG.Audio.Core.Audio
 [<RequireQualifiedAccess>]
 module Wav =
 
+    // `wFormatTag` for uncompressed PCM — the only codec the data chunk may be in for these bytes to
+    // mean what `BufferData` will assume they mean.
+    [<Literal>]
+    let FormatPcm = 1
+
+    // WAVE_FORMAT_EXTENSIBLE. Not a codec: a marker saying the real one is in a SubFormat GUID at the
+    // tail of the fmt chunk. Ordinary PCM is routinely written this way, so it must be resolved
+    // rather than rejected.
+    [<Literal>]
+    let private FormatExtensible = 0xFFFE
+
+    // The fmt chunk size an EXTENSIBLE header must have to actually carry the subformat it promises:
+    // 18 bytes of WAVEFORMATEX + cbSize(22) = 40. Anything shorter declares EXTENSIBLE and supplies
+    // no subformat, so there is nothing at offset 24 of the chunk to read.
+    [<Literal>]
+    let private FormatExtensibleSize = 40
+
     type PcmData =
-        { Channels: int
+        { FormatTag: int
+          Channels: int
           BitsPerSample: int
           SampleRate: int
           Data: byte[] }
 
-    // Minimal RIFF/WAVE PCM reader: walk chunks, pull fmt (channels/rate/bits) + data. Total —
+    // Minimal RIFF/WAVE PCM reader: walk chunks, pull fmt (codec/channels/rate/bits) + data. Total —
     // returns None on anything malformed or unrecognized rather than throwing.
+    //
+    // Structural parse ONLY: it reports what the header says, and decides nothing about playability.
+    // That split is the file's existing shape — a 5-channel 32-bit WAV parses here and is rejected by
+    // `bufferFormat` at upload — and `FormatTag` follows it rather than inventing a second rule.
     let tryParse (bytes: byte[]) : PcmData option =
         try
             let ascii off len = Text.Encoding.ASCII.GetString(bytes, off, len)
@@ -72,30 +94,85 @@ module Wav =
                 None
             else
                 let mutable pos = 12
+                let mutable formatTag = 0
                 let mutable channels = 0
                 let mutable sampleRate = 0
                 let mutable bits = 0
                 let mutable dataOff = -1
                 let mutable dataLen = 0
-                while pos + 8 <= bytes.Length do
+                // `walking` is a TERMINATION guard, and it is the whole point of this loop's shape.
+                // A chunk size is unsigned on disk but read back as a signed Int32, so a corrupt or
+                // hostile header can present a negative one — and the advance below is
+                // `8 + sz + (sz &&& 1)`, which is exactly ZERO for sz = -8 and sz = -9. `pos` then
+                // stops moving and this spins forever. The `try` wrapping this function cannot catch
+                // that: a hang is not an exception, so "Total — returns None on anything malformed"
+                // was false for two of the four billion sizes a file can name. A malformed chunk has
+                // to end the walk, never wedge the calling thread.
+                let mutable walking = true
+                while walking && pos + 8 <= bytes.Length do
                     let id = ascii pos 4
                     let sz = BitConverter.ToInt32(bytes, pos + 4)
                     let body = pos + 8
-                    if id = "fmt " && body + 16 <= bytes.Length then
-                        channels <- int (BitConverter.ToInt16(bytes, body + 2))
-                        sampleRate <- BitConverter.ToInt32(bytes, body + 4)
-                        bits <- int (BitConverter.ToInt16(bytes, body + 14))
-                    elif id = "data" then
-                        dataOff <- body
-                        dataLen <- sz
-                    // chunks are word-aligned: skip the body plus any pad byte.
-                    pos <- body + sz + (sz &&& 1)
+                    if sz < 0 then
+                        // Stop, rather than return None outright: a bad size means we cannot trust
+                        // anything BEYOND this chunk, not that what we already read is wrong. A file
+                        // whose fmt + data parsed cleanly before some corrupt trailing chunk still
+                        // plays, and the gate below still rejects one that never had them.
+                        walking <- false
+                    else
+                        if id = "fmt " && body + 16 <= bytes.Length then
+                            // wFormatTag says which CODEC the data chunk holds. It went unread here
+                            // for the whole life of this reader, and the omission was not a missing
+                            // feature but a LOUD bug: an IEEE-float or ADPCM file has plausible
+                            // channels/bits, so it sailed past `bufferFormat` and was handed to
+                            // `BufferData` as raw PCM. Every other failure in this component degrades
+                            // to silence on purpose; that one degraded to NOISE.
+                            //
+                            // ToUInt16, not ToInt16: WAVE_FORMAT_EXTENSIBLE is 0xFFFE, which read
+                            // signed is -2 and would never match anything.
+                            let tag = int (BitConverter.ToUInt16(bytes, body))
+                            channels <- int (BitConverter.ToInt16(bytes, body + 2))
+                            sampleRate <- BitConverter.ToInt32(bytes, body + 4)
+                            bits <- int (BitConverter.ToInt16(bytes, body + 14))
+                            // EXTENSIBLE defers the real codec to a SubFormat GUID at body+24, whose
+                            // first four bytes ARE the tag it stands for. Resolve it rather than
+                            // reject it: ordinary PCM is routinely written in the extensible form
+                            // (any multichannel export, and plenty of stereo ones), those files play
+                            // correctly today, and refusing them would turn working audio silent —
+                            // trading this bug for a worse one.
+                            //
+                            // `sz >= FormatExtensibleSize` is the load-bearing half of the guard, and
+                            // a bounds check against `bytes.Length` alone is NOT a substitute for it.
+                            // The subformat lives at offset 24 of the FMT CHUNK; a file that declares
+                            // EXTENSIBLE with a short (16-byte) fmt chunk has no subformat at all, and
+                            // body+24 then points into whatever chunk happens to follow — the data
+                            // chunk. Reading that as the codec is reading audio samples as a format
+                            // tag, and samples that happen to begin `01 00 00 00` would be read as
+                            // "PCM" and uploaded as PCM: this bug's own fix handing the bug back.
+                            formatTag <-
+                                if tag <> FormatExtensible then tag
+                                elif sz >= FormatExtensibleSize && body + 28 <= bytes.Length then
+                                    BitConverter.ToInt32(bytes, body + 24)
+                                // No subformat to read, so the codec is genuinely unknown — and
+                                // assuming PCM is the assumption this whole change exists to remove.
+                                else FormatExtensible
+                        elif id = "data" then
+                            dataOff <- body
+                            dataLen <- sz
+                        // Chunks are word-aligned: skip the body plus any pad byte. Computed in
+                        // int64 so a size near Int32.MaxValue cannot overflow `pos` NEGATIVE — which
+                        // the loop guard would read as "keep going" and `ascii` would then throw on,
+                        // making the parser total by accident of exception handling rather than by
+                        // construction. Past the end simply ends the walk.
+                        let next = int64 body + int64 sz + int64 (sz &&& 1)
+                        pos <- if next >= int64 bytes.Length then bytes.Length else int next
                 if dataOff < 0 || channels = 0 || bits = 0 then
                     None
                 else
                     let len = max 0 (min dataLen (bytes.Length - dataOff))
                     Some
-                        { Channels = channels
+                        { FormatTag = formatTag
+                          Channels = channels
                           BitsPerSample = bits
                           SampleRate = sampleRate
                           Data = Array.sub bytes dataOff len }
@@ -233,13 +310,20 @@ module VoicePool =
 [<RequireQualifiedAccess>]
 module AssetDiagnostics =
 
-    // Why an id produced no playable buffer (#28). Three distinct fixes, so the diagnostic names
-    // which one rather than saying "no sound": a missing asset is a resolver/shipping problem, a bad
-    // file is an authoring problem, an unsupported format is a conversion problem.
+    // Why an id produced no playable buffer (#28). Distinct fixes, so the diagnostic names which one
+    // rather than saying "no sound": a missing asset is a resolver/shipping problem, a bad file is an
+    // authoring problem, an unsupported codec or channel/bit pair is a conversion problem.
     type Failure =
         | Unresolved
         | NotWav of bytes: int
         | UnsupportedFormat of channels: int * bitsPerSample: int
+        // A WAV whose CODEC is not PCM. Its own case rather than a reuse of UnsupportedFormat,
+        // because that one reports channels and bits — and for, say, mono 16-bit IMA-ADPCM it would
+        // read "1-channel 16-bit WAV, which OpenAL has no buffer format for", which is simply false:
+        // OpenAL has Mono16. The bytes are wrong, not their shape. A diagnostic that misnames the
+        // cause sends the reader to re-export at a bit depth that was never the problem, which is the
+        // failure #28 exists to prevent, one level in.
+        | UnsupportedCodec of formatTag: int
 
     // The asset that failed, carrying the product's own id — the only handle the host has on it.
     type Asset =
@@ -255,6 +339,21 @@ module AssetDiagnostics =
         match asset with
         | Sound _ -> "AssetResolver.ResolveSound"
         | Track _ -> "AssetResolver.ResolveTrack"
+
+    // Name the codec rather than printing a bare number: "format tag 0x0003" is a search engine's
+    // problem, "IEEE-float" is the reader's own export dialog.
+    let private codecName (tag: int) =
+        match tag with
+        | 1 -> "PCM"
+        | 2 -> "MS-ADPCM"
+        | 3 -> "IEEE-float"
+        | 6 -> "A-law"
+        | 7 -> "mu-law"
+        | 0x11 -> "IMA-ADPCM"
+        | 0x31 -> "GSM 6.10"
+        | 0x55 -> "MP3-in-WAV"
+        | 0xFFFE -> "WAVE_FORMAT_EXTENSIBLE with an unreadable subformat"
+        | _ -> "an unrecognized codec"
 
     // The line for one failure. A value rather than a print, so a test asserts on it directly. It
     // cannot name the file it looked for — the host does not own the id -> asset mapping (FR-005),
@@ -279,6 +378,20 @@ module AssetDiagnostics =
                 what
                 channels
                 bits
+        | UnsupportedCodec tag ->
+            // Says WHY it is silent rather than only that it is: silence here is a deliberate
+            // refusal, and the alternative was not "nothing happens" but a burst of static. A reader
+            // who hears silence looks for a missing file; one who heard noise and now hears silence
+            // needs to know the two have the same cause and that this is the fix.
+            // Phrased to put the codec in apposition rather than after an article: the tag names
+            // range over "IEEE-float", "A-law" and "an unrecognized codec", and no single article
+            // fits them all — "a IEEE-float WAV" and "a MP3-in-WAV WAV" are what the obvious
+            // phrasing produces.
+            sprintf
+                "FS.GG.Audio.Host: %s is not the uncompressed PCM this reader decodes — its fmt chunk declares %s (format tag 0x%04X) — so every play of it is silent. Re-export it as uncompressed PCM (16-bit mono or stereo; mono if it is positional). The silence is deliberate: decoded as PCM these bytes are not quiet, they are NOISE — which is why the codec is checked rather than assumed."
+                what
+                (codecName tag)
+                tag
 
     // A warn-once-per-id latch over `message`. Device-free (it holds ids and an emit callback, no
     // OpenAL types), which is what lets the failure leg be asserted headless — the backend that
@@ -632,6 +745,16 @@ module private OpenAl =
         let uploadBuffer (bytes: byte[]) : Result<uint, AssetDiagnostics.Failure> =
             match Wav.tryParse bytes with
             | None -> Error(AssetDiagnostics.NotWav bytes.Length)
+            // The CODEC gate, and it comes BEFORE the channel/bit one deliberately. A non-PCM file
+            // usually trips both — an IEEE-float export is 32-bit, which `bufferFormat` also refuses —
+            // and reporting the bit depth first would send the reader to re-export at 16-bit while
+            // leaving the codec, the actual cause, in place. Name the cause, not the symptom.
+            //
+            // Without this gate `bufferFormat` decides on channels/bits ALONE, so mono 16-bit
+            // IMA-ADPCM passed as Mono16 and reached BufferData, which cannot know the bytes are
+            // compressed and renders them as PCM: full-scale noise at the mixer's gain.
+            | Some pcm when pcm.FormatTag <> Wav.FormatPcm ->
+                Error(AssetDiagnostics.UnsupportedCodec pcm.FormatTag)
             | Some pcm ->
                 match bufferFormat pcm.Channels pcm.BitsPerSample with
                 | None -> Error(AssetDiagnostics.UnsupportedFormat(pcm.Channels, pcm.BitsPerSample))
