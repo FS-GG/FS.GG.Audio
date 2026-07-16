@@ -22,10 +22,22 @@
          adds a patent grant and an attribution requirement over MIT — see THIRD-PARTY-NOTICES.md. -->
     <PackageVersion Include="Elmish" Version="5.0.2" />
     <!-- Test-only. FsCheck 3.x to match the ported suite's API (Config.QuickThrowOnFailure.WithMaxTest
-         / Check.One) — the same line the donor Canvas.Tests used. -->
+         / Check.One) — the same line the donor Canvas.Tests used.
+
+         EXPECTO AND THE ADAPTER ARE PINNED AS A PAIR, and neither can move on its own. Checked
+         2026-07-16 against nuget.org, because "there is a newer one" is true of both and misleading
+         about both:
+
+           YoloDev.Expecto.TestSdk 0.15.6 (here) -> Expecto [10.2.2, 11.0.0)
+           YoloDev.Expecto.TestSdk 1.0.0  (newer) -> Expecto [9.0.0,  10.0.0)
+
+         So 1.0.0 is a HIGHER NUMBER ON AN OLDER LINEAGE: taking it would drag Expecto BACK to 9.x.
+         And Expecto 11.1.0 is unusable at any adapter version — 0.15.6 caps below 11, and 1.0.0 caps
+         below 10 — so Expecto stays on 10.2.3 until an adapter ships that admits 11. NU1608 catches
+         both mistakes at restore (Warning-As-Error), which is why this is a note and not a scar. -->
     <PackageVersion Include="Expecto" Version="10.2.3" />
     <PackageVersion Include="FsCheck" Version="3.3.3" />
-    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.7.0" />
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.8.1" />
     <PackageVersion Include="YoloDev.Expecto.TestSdk" Version="0.15.6" />
   </ItemGroup>
 </Project>

@@ -5,7 +5,14 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <Deterministic>true</Deterministic>
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
-    <RestoreLockedMode Condition="'$(ContinuousIntegrationBuild)' == 'true' And Exists('$(MSBuildProjectDirectory)/packages.lock.json')">true</RestoreLockedMode>
+    <!-- No RestoreLockedMode here, deliberately. A condition on $(ContinuousIntegrationBuild) stood
+         here and was DEAD: nothing in this repo sets that property, and the SDK does not infer it
+         from GitHub Actions — so it never evaluated true, and it read as a guarantee that locked
+         restore happens in CI while providing none (review 2026-07-16 §3.12).
+         Locked restore is asserted where it is actually wanted, explicitly and visibly: the
+         locked-mode restore flag is passed in gate.yml's cold restore, and in BOTH of release.yml's
+         jobs. A dead property that looks like a safety net is worse than no property.
+         (No double hyphen above, deliberately: XML forbids one inside a comment.) -->
   </PropertyGroup>
 
   <!-- ONE AUTHORITATIVE FEED, ON EVERY MACHINE (#31).

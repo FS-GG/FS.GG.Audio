@@ -72,7 +72,9 @@ dotnet run --project samples/FS.GG.Audio.Sample
 
 The default backend under test is Null/record — no device is opened, and the recorded evidence /
 engine state *is* the proof. The whole suite runs headless in CI (`gate.yml`). The real OpenAL
-device backend is exercised only behind an opt-in manual lane, never in the CI assertion path.
+device backend is exercised for real in CI too: `gate.yml` opens an actual OpenAL device via OpenAL
+Soft's null driver — a real device that renders to nothing — so the whole device path executes
+headless on every PR, and a skipped device test fails the gate rather than passing quietly.
 
 ## Development
 

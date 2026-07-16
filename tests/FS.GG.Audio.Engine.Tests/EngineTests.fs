@@ -281,9 +281,26 @@ let tests =
         }
 
         test "a throwing backend is swallowed — step never throws (FR-008)" {
+            // `Expect.isTrue true` stood here: a literal tautology that passed whether `step` threw
+            // or not, since a throw would have failed the test by escaping anyway. It asserted the
+            // right thing by ACCIDENT and asserted nothing on purpose — the same species this suite's
+            // Host counterpart hunted down and removed. Say it directly instead.
             let engine = Engine.create (new ThrowingBackend() :> IAudioBackend)
-            Engine.step engine 0.016 [ CoreAudio.playSfx (SoundId "s") 1.0; CoreAudio.stopMusic ]
-            Expect.isTrue true "step completed without an exception escaping into game code"
+            let step () =
+                Engine.step engine 0.016 [ CoreAudio.playSfx (SoundId "s") 1.0; CoreAudio.stopMusic ]
+            // The claim is TOTALITY, not "it happened to work once": the backend throws on every
+            // call, and every frame of a real game would hit it.
+            for _ in 1..5 do
+                match (try Ok(step ()) with ex -> Error ex) with
+                | Ok() -> ()
+                | Error ex ->
+                    failtestf
+                        "step let a %s escape into game code — a device fault must degrade to silence (FR-008)"
+                        (ex.GetType().Name)
+            // And it kept mixing while the device was refusing everything: the fault is contained,
+            // not absorbed into a broken engine.
+            Engine.step engine 0.0 [ CoreAudio.setBusVolume Music 0.5 ]
+            Expect.floatClose acc (engine.BusGain Music) 0.5 "the mixer keeps working while the backend throws"
         }
 
         // --- #33: swallowing the throw is right; swallowing it SILENTLY, forever, is not. These
