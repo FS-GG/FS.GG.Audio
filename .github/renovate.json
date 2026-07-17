@@ -3,25 +3,15 @@
   "description": [
     "Extends the org-shared preset, like every sibling repo. The preset (FS-GG/.github/default.json) carries the FS.GG.* datasource routing, the prerelease policy, the dependency dashboard, semantic commits, and the custom managers for embedded cross-repo pins.",
     "NO hostRules BLOCK HERE, and that is deliberate twice over. Rendering, SDD and Governance each carry one supplying the Mend App Secret FSGG_PACKAGES_READ_TOKEN for nuget.pkg.github.com — but the org preset's own commentary records that its premise ('FS.GG.* are not on nuget.org') was FALSE for all 32 of the 32 packages the org publishes, that the token never resolved, and that a 401 on a Renovate datasource is an empty version list rather than an error. That sentence froze the FS.GG.SDD.Cli pin four times. FS-GG/.github removed the block from its own config for exactly that reason; those three siblings have not caught up. Copying it here would import a known-dead workaround.",
-    "It is moot for this repo anyway: FS.GG.Audio consumes ZERO FS.GG.* packages. Its whole dependency set is FSharp.Core, Silk.NET.OpenAL(.Soft.Native), Elmish, and the test stack — all public on nuget.org, all readable with no credential."
+    "It is moot for this repo anyway: FS.GG.Audio consumes ZERO FS.GG.* packages. Its whole dependency set is FSharp.Core, Silk.NET.OpenAL(.Soft.Native), Elmish, and the test stack — all public on nuget.org, all readable with no credential.",
+    "NO YoloDev.Expecto.TestSdk CAP HERE, and its absence is deliberate — do not re-add one. The adapter's latest version IS a downgrade: 1.0.0 depends on Expecto [9.0.0, 10.0.0), an OLDER lineage than 0.16.0's. So the cap is real and still needed; it just lives in the org-shared preset that `extends` below pulls in, rather than here, where it covers every sibling repo at once and a daily gate (pin-coherence.yml, 06:43 UTC) re-checks its expiry against api.nuget.org. This repo carried a second, identical `<1.0.0` copy until #161 deleted it: a duplicate is a copy that must be kept in step, and it would have gone on capping the adapter after the preset's own cap retired on its trigger — which is the defect FS-GG/.github#850 was filed about, one level down."
   ],
   "extends": ["github>FS-GG/.github"],
   "packageRules": [
     {
       "description": [
-        "THE ADAPTER'S LATEST VERSION IS A DOWNGRADE. Its published order is 0.15.5, 0.15.6, 0.16.0, 1.0.0, and the Expecto range it permits does not rise with the number:",
-        "  0.15.6 -> Expecto [10.2.2, 11.0.0)   0.16.0 -> Expecto 10.2.3 (no upper bound)   1.0.0 -> Expecto [9.0.0, 10.0.0)",
-        "So 1.0.0 is a higher number on an OLDER lineage. Renovate cannot see that — it reads versions, not lineages — and would propose it every cycle. Taking it would force Expecto back to 9.x, which NU1608 rejects at restore (Warning-As-Error), so the PR could never go green and would churn forever. Cap it.",
-        "ACTION WHEN the adapter publishes a version above 1.0.0 that depends on Expecto >= 11: delete this cap. Check the nuspec's Expecto range, not the version number — that is the mistake this rule exists to prevent, and it is the mistake that produced the cap."
-      ],
-      "matchDatasources": ["nuget"],
-      "matchPackageNames": ["YoloDev.Expecto.TestSdk"],
-      "allowedVersions": "<1.0.0"
-    },
-    {
-      "description": [
         "Expecto and its test-SDK adapter are one unit: the adapter pins an Expecto range, so a bump to either alone can resolve to a graph the other rejects (NU1608). Group them so the pair moves in one PR that can actually go green.",
-        "No allowedVersions cap on Expecto here, unlike FS.GG.Rendering's config. Rendering caps it below 11 because 'the only adapter constrains Expecto to < 11.0.0' — true when written, and no longer: adapter 0.16.0 depends on Expecto 10.2.3 with no upper bound, and this repo runs Expecto 11 on it. Rendering's own rule says to delete the cap when such a release ships; it has (cross-repo item filed)."
+        "No allowedVersions cap on Expecto here, and none anywhere in the org any more. FS.GG.Rendering used to cap it below 11 because 'the only adapter constrains Expecto to < 11.0.0' — true when written, and no longer: adapter 0.16.0 depends on Expecto 10.2.3 with no upper bound, and this repo runs Expecto 11 on it. Rendering's own rule said to delete the cap when such a release shipped, nothing re-checked it, and it outlived its reason by months until FS.GG.Rendering#845 retired it. That is the defect the preset's `fsgg-cap-expires-when:` annotation now exists to prevent."
       ],
       "matchDatasources": ["nuget"],
       "matchPackageNames": ["Expecto", "YoloDev.Expecto.TestSdk"],
@@ -39,7 +29,8 @@
     {
       "description": [
         "FSharp.Core is an ORG-WIDE COMMON PIN, not this repo's to move. Rendering, SDD and Governance pin 10.1.301; FS.GG.Game pins 10.1.302; nobody is on 11.x. A unilateral bump here would widen an incoherence that already exists rather than fix it.",
-        "Not `enabled: false` — a Renovate PR is a useful signal that the org has drifted, and the dependency dashboard is where that belongs. Held at the current org majority instead, so the bot proposes patch moves within the pinned line and cannot silently take Audio to a major nobody else is on. Raising this ceiling is a cross-repo decision (see the cross-repo-coordination protocol), and the ceiling is the reminder that it is one."
+        "Not `enabled: false` — a Renovate PR is a useful signal that the org has drifted, and the dependency dashboard is where that belongs. Held at the current org majority instead, so the bot proposes patch moves within the pinned line and cannot silently take Audio to a major nobody else is on. Raising this ceiling is a cross-repo decision (see the cross-repo-coordination protocol), and the ceiling is the reminder that it is one.",
+        "fsgg-cap-expires-when: manual — this cap expires on an ORG-COORDINATION fact, not a nuspec fact: it lifts when the org majority moves off FSharp.Core 10.1.x, and no registry query can answer that. api.nuget.org knows what FSharp.Core published; it cannot know what Rendering, SDD, Governance and Game pin, which is the whole reason for the ceiling. The predicate form (dependency=… admits=…) quantifies over the versions THIS cap excludes and reads their nuspecs, so it cannot express this trigger. Retiring the cap is the cross-repo decision described above — re-check it there, not here."
       ],
       "matchDatasources": ["nuget"],
       "matchPackageNames": ["FSharp.Core"],
