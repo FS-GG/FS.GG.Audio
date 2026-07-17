@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "isRoot": true,
+  "tools": {
+    "fake-cli": {
+      "version": "6.1.4",
+      "commands": [
+        "fake"
+      ]
+    },
+    "fs.gg.coord.cli": {
+      "version": "0.3.0",
+      "commands": [
+        "fsgg-coord-engine"
+      ]
+    }
+  }
+}
