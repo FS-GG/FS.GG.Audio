@@ -31,6 +31,33 @@ FS.GG.Audio.Engine  — buses · fades · ducking · 3D   (deterministic state m
 FS.GG.Audio.Host    — Null/record (default, headless)  |  OpenAL (Silk.NET, degrade-to-Null)
 ```
 
+## Acquire
+
+Every `FS.GG.*` package is **public on [nuget.org](https://www.nuget.org) and
+restores with no credential**
+([ADR-0039](https://github.com/FS-GG/.github/blob/main/docs/adr/0039-nuget-org-is-the-read-path.md)).
+Start with the entry package:
+
+```sh
+dotnet add package FS.GG.Audio.Core
+```
+
+Then add the layers you need — the device host, the mixing engine, and the Elmish
+authoring bridge:
+
+```sh
+dotnet add package FS.GG.Audio.Host
+dotnet add package FS.GG.Audio.Engine
+dotnet add package FS.GG.Audio.Elmish
+```
+
+The [Quick start](#quick-start) below needs Core, Host and Engine; the full package
+map — what each layer is and what it depends on — is the [Packages](#packages) table
+above. **Host, Engine and Elmish redistribute the OpenAL Soft native library
+(LGPL-2.0-or-later); Core does not** — see
+**[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)** for what ships, how to replace it,
+and how to exclude it.
+
 ## Quick start
 
 ```fsharp
