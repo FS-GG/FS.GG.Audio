@@ -104,7 +104,9 @@ the shim resolves no engine it fails loudly with what to do — never a silent n
 
 ```sh
 eval "$(scripts/fsgg-coord whoami --mint)"     # MINT one; never invent or copy one (#419, #551)
-scripts/fsgg-coord take --repo <this-repo>     # pick + claim the next SCHEDULABLE item, retrying a lost race
+receipt="$(scripts/fsgg-coord take --repo <this-repo> --json)"
+jq -e '.markerObserved and .status == "In progress" and .converged' <<<"$receipt" >/dev/null
+# Do not implement or announce before that fresh marker + board readback succeeds (#1369).
 git fetch origin                               # NOTHING else does — the base is otherwise the PAST (#622)
 git worktree add ../<repo>-<n> -b item/<n>-<slug> origin/main   # name the base (#319)
 # ...implement, commit with the printed FSGG-Worker trailer, PR into main...
@@ -113,7 +115,9 @@ scripts/fsgg-coord done <issue> --flip         # earn the stamp
 
 `take` is the entry point. It asks `batch` what is schedulable *right now* (disjoint from
 everything in flight), claims it, and — on a lost race — **re-schedules** rather than going
-home. Use `claim <issue>` only when you must have a *specific* item.
+home. Its JSON receipt is the postcondition: winning the REST lock and observing the user-visible
+board column are separate facts, and work starts only when `.converged` proves both. Use
+`claim <issue> --json` when you must have a *specific* item, and apply the same predicate.
 
 ## 1. Declare the touch-set (on every parallelizable item)
 
@@ -240,7 +244,7 @@ item's touch-set is **reserved**, not merely skipped.
 ## 3. Claim, isolate, heartbeat
 
 ```sh
-scripts/fsgg-coord claim <issue>            # marker + assignee + Status=In progress; prints the worktree
+scripts/fsgg-coord claim <issue> --json     # marker + Status=In progress; emits the fresh receipt
 scripts/fsgg-coord claim <issue> --force    # steal an item another worker holds
 scripts/fsgg-coord heartbeat <issue>        # renew the lease on a long-running claim
 scripts/fsgg-coord release <issue>          # drop the lease; Status RESTORED to what the claim overwrote
@@ -347,9 +351,9 @@ scripts/fsgg-coord say <issue> --to <worker> 'I own src/Audio until this lands.'
 scripts/fsgg-coord inbox --repo <r>          # what is new for me, across every live claim
 ```
 
-`widen` **re-declares** a touch-set mid-flight. It sets `Paths:` to exactly what you pass — it does
-not union with what was there — then re-checks the result against every live claim **and notifies
-whoever it now collides with**:
+`widen` **extends** a touch-set mid-flight. It writes the normalized union of the current declaration
+and the supplied tokens, then re-checks the result against every live claim **and notifies whoever it
+now collides with**. Repeated calls preserve earlier paths and are idempotent:
 
 ```sh
 scripts/fsgg-coord widen <issue> --paths "src/Scene/**, src/Audio/**"   # non-zero on a collision
@@ -357,12 +361,17 @@ scripts/fsgg-coord widen <issue> --paths "src/Scene/**, src/Audio/**"   # non-ze
 
 Stop editing the shared paths until the collision is resolved.
 
-**So it narrows, too — and narrowing is the direction nobody ever uses.** Pass a smaller set and the
-reservation genuinely shrinks. A narrowing can never be refused for collision, because a subset
-collides with nothing its superset did not; the capability is already there and it is safe. The name
-says "widen" and only the *growth* direction is ever taught, so an over-reservation is **never handed
-back** — it holds for the full lease, against files nobody is touching, and the workers it locks out
-see only a dead queue ([#601](https://github.com/FS-GG/.github/issues/601)).
+**Narrow with the explicit replacement operation.** Pass the complete smaller set to `set-paths`:
+
+```sh
+scripts/fsgg-coord set-paths <issue> --paths "src/Scene/**"
+```
+
+A narrowing can never collide, because a subset reserves nothing its superset did not; the command
+still re-checks and reports the fresh verdict. Keeping replacement behind a separate name prevents a
+late additive `widen` from silently handing away every path declared earlier (#1377). Without an
+explicit narrowing, an over-reservation holds for the full lease and workers it locks out see only a
+dead queue ([#601](https://github.com/FS-GG/.github/issues/601)).
 
 **When you learn your declaration over-reserves, re-declare it smaller — at once, not at merge.**
 [pnext-item §3](../pnext-item/SKILL.md) names the two triggers that actually fire.
