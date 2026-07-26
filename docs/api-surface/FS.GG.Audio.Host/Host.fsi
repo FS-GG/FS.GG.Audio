@@ -54,7 +54,7 @@ type IMixingBackend =
 /// backend (FR-002). One that `OpenAlBackend.create` SUBSTITUTED, because no device would open, is a
 /// game running silently. At the `IAudioBackend` seam the two are indistinguishable — both satisfy
 /// the interface, both accept every effect, both play none — which is exactly how a shipped game
-/// comes to run record-only, and how a CI suite comes to assert playback against a recorder.
+/// comes to run silently, and how a CI suite comes to assert playback against a no-op.
 [<RequireQualifiedAccess>]
 type Silence =
     /// `NullBackend.create` — record-only, chosen deliberately (FR-002).
@@ -70,7 +70,8 @@ type Silence =
 type BackendKind =
     /// The bundled OpenAL backend, with a device actually open.
     | DeviceBacked
-    /// A record-only backend: it accepts every effect and plays none. `Silence` says why.
+    /// A Null backend: it accepts every effect and plays none. A deliberately requested one records
+    /// evidence; a device-unavailable fallback discards it. `Silence` says which one this is.
     | RecordOnly of Silence
     /// An `IAudioBackend` this library did not build — a product's own backend, or a test fake.
     /// Neither `DeviceBacked` nor `RecordOnly`: this library cannot say whether it reaches a device,
@@ -407,26 +408,26 @@ module NullBackend =
     [<Sealed>]
     type T =
         interface IAudioBackend
-        /// Accumulated evidence — equal to `FS.GG.Audio.Core.Audio.interpret` of the same batch.
+        /// Accumulated evidence for a deliberately requested recorder — equal to
+        /// `FS.GG.Audio.Core.Audio.interpret` of the same batch.
         ///
-        /// Every effect played through this backend is retained until `Clear`, for the life of the
-        /// instance. That is deliberate — the retained requests ARE the evidence a headless test
-        /// asserts on — but it is also UNBOUNDED, and worth knowing about for anything long-lived:
-        /// a soak test, or a shipped game that reached this backend through the `OpenAlBackend.create`
-        /// degrade (FR-004) and will never read `Evidence` at all. Such a caller should `Clear`
-        /// periodically, or hold a backend of its own that records nothing.
+        /// A backend created deliberately by `NullBackend.create` retains each effect until `Clear`;
+        /// the retained requests ARE the evidence a headless test asserts on. A backend substituted
+        /// by `OpenAlBackend.create` after device failure records nothing: that production fallback
+        /// is process-lifetime silence, not an observer, and therefore stays bounded without
+        /// requiring an external caller to discover and clear it.
         ///
         /// Materialized on each read, so read it once and bind it rather than re-reading it in a loop.
         member Evidence: AudioEvidence
-        /// Effects recorded since construction or the last `Clear`. `Evidence.Requested.Length`
-        /// without materializing the list.
+        /// Effects recorded since construction or the last `Clear`. Always zero for a substituted
+        /// device-unavailable fallback. `Evidence.Requested.Length` without materializing the list.
         member RecordedCount: int
         /// Why this backend is silent (#34): `Requested` when the product built it on purpose,
         /// `DeviceUnavailable` when `OpenAlBackend.create` substituted it. Prefer `Backend.kindOf`,
         /// which answers the same question for ANY `IAudioBackend` without a type test.
         member Silence: Silence
-        /// Drop everything recorded so far, so a long-lived holder can bound what is otherwise kept
-        /// for the life of the instance. `Evidence` is then empty until the next `Play`.
+        /// Drop everything recorded so far. `Evidence` is then empty until the next `Play` on a
+        /// deliberately requested recorder; this is a no-op on the bounded production fallback.
         member Clear: unit -> unit
 
     /// Create a fresh Null backend. Its `Silence` is `Requested` — this is the deliberate,
@@ -443,8 +444,8 @@ module OpenAlBackend =
     /// and never throws into game code.
     ///
     /// **That substitution is silent unless you ask (#34).** The returned value is an `IAudioBackend`
-    /// either way, so a caller who does not check cannot tell a device from a tape recorder: a shipped
-    /// game runs record-only, and a headless test suite asserts playback against a recorder and passes
+    /// either way, so a caller who does not check cannot tell a device from a no-op: a shipped
+    /// game runs silently, and a headless test suite asserts playback against a no-op and passes
     /// *because* nothing played. Ask `Backend.isDeviceBacked` (or `Backend.kindOf`, which also carries
     /// the device's reason) — in a product, to surface "no audio device" in its own UI rather than
     /// trusting stderr; in a test, to SKIP loudly rather than assert vacuously.
@@ -486,7 +487,7 @@ module Backend =
     ///
     /// This is the predicate a TEST SUITE must branch on before it trusts its own audio assertions.
     /// On a headless box `OpenAlBackend.create` degrades to Null, so a test that drives playback is
-    /// asserting against a recorder and passes *because* nothing played. Skip loudly (`Ignored`)
+    /// asserting against a no-op and passes *because* nothing played. Skip loudly (`Ignored`)
     /// rather than assert vacuously — a green tick on a subject that was never constructed is
     /// reporting on nothing.
     ///
