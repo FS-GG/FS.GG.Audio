@@ -18,6 +18,12 @@ description: >
 # A guard that silently never fires is the very defect it exists to catch. Doubling the surface for
 # that class of bug in order to close a gap of the same class would be its own punchline.
 
+inputs:
+  configuration:
+    description: Build configuration exercised by dotnet test.
+    required: false
+    default: Debug
+
 runs:
   using: composite
   steps:
@@ -53,7 +59,7 @@ runs:
         export LD_LIBRARY_PATH
         echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH"
 
-        dotnet test FS.GG.Audio.slnx -c Debug --no-restore 2>&1 | tee test-output.txt
+        dotnet test FS.GG.Audio.slnx -c "${{ inputs.configuration }}" --no-restore 2>&1 | tee test-output.txt
 
         # A skip is a REGRESSION, not a fact of life: with the lib resolved and the null driver
         # selected, the device lane MUST execute. `dotnet test` cannot fail on skip, so assert it.

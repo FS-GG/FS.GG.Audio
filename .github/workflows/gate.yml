@@ -136,6 +136,14 @@ jobs:
       # .github/actions/headless-test for why this is an action rather than a block pasted into both.
       - uses: ./.github/actions/headless-test
 
+      # Optimized code is a distinct test subject. The Elmish dependency assertion used to inspect
+      # incidental assembly metadata and failed only here because optimization legitimately removed
+      # that reference; Debug-only CI never saw it (#198). Run the SAME non-vacuous device lane in
+      # Release so configuration-specific failures cannot wait for a tag-triggered pack.
+      - uses: ./.github/actions/headless-test
+        with:
+          configuration: Release
+
       # The showcase claims, in its own footer, that the transcript is identical every run — the
       # mixer advances on a fixed dt and only the sleeping is real. That is a claim about the library
       # (a deterministic mixer), not about the sample, so it is worth holding it to. --fast, because

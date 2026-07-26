@@ -86,23 +86,34 @@ let tests =
             Expect.isEmpty dispatched "no message dispatched"
         }
 
-        test "the package references only Elmish + Host + Core (+ FSharp.Core), never FS.GG.UI/SkiaSharp (FR-004)" {
-            // A produced effect is a lambda compiled into the package's own assembly, so its runtime
-            // type reliably identifies FS.GG.Audio.Elmish (no dependence on load order).
-            let fake = new RecordingBackend()
-            let cmd: Elmish.Cmd<int> = AudioCmd.stopMusic (fake :> IAudioBackend)
-            let effect = List.head cmd
-            let refs =
-                effect.GetType().Assembly.GetReferencedAssemblies()
-                |> Array.map (fun n -> n.Name)
-            Expect.isFalse
-                (refs |> Array.exists (fun n -> not (isNull n) && n.StartsWith "FS.GG.UI"))
-                "no FS.GG.UI dependency"
-            Expect.isFalse (refs |> Array.contains "SkiaSharp") "no SkiaSharp dependency"
-            Expect.isTrue (refs |> Array.contains "Elmish") "references Elmish"
-            Expect.isTrue (refs |> Array.contains "FS.GG.Audio.Host") "references FS.GG.Audio.Host"
-            Expect.isTrue (refs |> Array.contains "FS.GG.Audio.Core") "references FS.GG.Audio.Core"
-            Expect.isTrue (refs |> Array.contains "FS.GG.Audio.Engine") "references FS.GG.Audio.Engine (005 FR-005)"
+        test "the project declares exactly Elmish + Core/Host/Engine + FSharp.Core, never FS.GG.UI/SkiaSharp (FR-004)" {
+            // Assembly.GetReferencedAssemblies is NOT the package dependency contract: the Release
+            // optimizer can erase a metadata reference whose type aliases compile away, even while
+            // the project and resulting nuspec correctly depend on Elmish. Read the authored project
+            // instead. The behavioral tests above separately prove the Cmd surface executes.
+            let project =
+                Path.Combine(repoRoot (), "src", "FS.GG.Audio.Elmish", "FS.GG.Audio.Elmish.fsproj")
+                |> System.Xml.Linq.XDocument.Load
+            let includes elementName =
+                project.Descendants()
+                |> Seq.filter (fun e -> e.Name.LocalName = elementName)
+                |> Seq.choose (fun e ->
+                    match e.Attribute(System.Xml.Linq.XName.Get "Include") with
+                    | null -> None
+                    | attr -> Some attr.Value)
+                |> Set.ofSeq
+            let packages = includes "PackageReference"
+            let projects =
+                includes "ProjectReference"
+                // Project files spell relative paths with Windows separators; normalize before the
+                // test runs on Linux, where backslash is an ordinary filename character.
+                |> Set.map (fun path -> path.Replace('\\', '/') |> Path.GetFileNameWithoutExtension)
+
+            Expect.equal packages (set [ "Elmish"; "FSharp.Core" ]) "exact external package contract"
+            Expect.equal
+                projects
+                (set [ "FS.GG.Audio.Core"; "FS.GG.Audio.Host"; "FS.GG.Audio.Engine" ])
+                "exact sibling project contract"
         }
 
         test "ofEngine routes the batch through Engine.step so mixing applies (005 FR-001, FR-002)" {
