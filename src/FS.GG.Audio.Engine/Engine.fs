@@ -174,14 +174,20 @@ type T(config: SpatialConfig, backend: IAudioBackend, device: DeviceDiagnostics.
             fades.[bus] <- { Elapsed = 0.0; Duration = seconds; StartG = busGain bus; EndG = target; Curve = Linear }
 
     member _.CrossFade(fromBus: Bus, toBus: Bus, seconds: float) =
+        // Scale the equal-power envelopes by the gains the product configured. The target used to
+        // end at a hard-coded 1.0, so cross-fading into a quiet (or deliberately muted) bus silently
+        // rewrote its mix. Capture the envelope-shaped BASE gains, not busGain: a transient Duck
+        // must not become the target's new permanent base when the cross-fade completes.
+        let fromGain = clamp01 (baseOf fromBus)
+        let toGain = clamp01 (baseOf toBus)
         if isImmediate seconds then
             fades.Remove fromBus |> ignore
             fades.Remove toBus |> ignore
             baseGain.[fromBus] <- 0.0
-            baseGain.[toBus] <- 1.0
+            baseGain.[toBus] <- toGain
         else
-            fades.[fromBus] <- { Elapsed = 0.0; Duration = seconds; StartG = busGain fromBus; EndG = 0.0; Curve = EqualPowerOut }
-            fades.[toBus] <- { Elapsed = 0.0; Duration = seconds; StartG = 0.0; EndG = 1.0; Curve = EqualPowerIn }
+            fades.[fromBus] <- { Elapsed = 0.0; Duration = seconds; StartG = fromGain; EndG = 0.0; Curve = EqualPowerOut }
+            fades.[toBus] <- { Elapsed = 0.0; Duration = seconds; StartG = 0.0; EndG = toGain; Curve = EqualPowerIn }
 
     member _.Step(dt: float, effects: AudioEffect list) =
         // 1. time passes.
