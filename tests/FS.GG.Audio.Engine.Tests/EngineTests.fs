@@ -110,6 +110,47 @@ let tests =
             Expect.floatClose acc (engine.BusGain Sfx) 1.0 "to-bus ends at unity"
         }
 
+        test "crossFade scales by and restores configured source/target gains (#197)" {
+            let engine = Engine.create (mixing () :> IAudioBackend)
+            Engine.step engine 0.0
+                [ CoreAudio.setBusVolume Music 0.4
+                  CoreAudio.setBusVolume Sfx 0.25 ]
+
+            Engine.crossFade engine Music Sfx 1.0
+            Engine.step engine 0.5 []
+            let equalPowerHalf = sqrt 0.5
+            Expect.floatClose
+                acc
+                (engine.BusGain Music)
+                (0.4 * equalPowerHalf)
+                "source envelope is relative to its configured gain"
+            Expect.floatClose
+                acc
+                (engine.BusGain Sfx)
+                (0.25 * equalPowerHalf)
+                "target envelope is relative to its configured gain"
+
+            Engine.step engine 0.5 []
+            Expect.floatClose acc (engine.BusGain Music) 0.0 "source completes at silence"
+            Expect.floatClose acc (engine.BusGain Sfx) 0.25 "target restores its configured non-unity gain"
+        }
+
+        test "crossFade preserves a muted target through and after completion (#197)" {
+            let engine = Engine.create (mixing () :> IAudioBackend)
+            Engine.step engine 0.0
+                [ CoreAudio.setBusVolume Music 0.6
+                  CoreAudio.setBusVolume Ambient 0.0 ]
+
+            Engine.crossFade engine Music Ambient 1.0
+            Engine.step engine 0.5 []
+            Expect.floatClose acc (engine.BusGain Ambient) 0.0 "a muted target stays muted during the fade"
+            Engine.step engine 0.5 []
+            Expect.floatClose acc (engine.BusGain Music) 0.0 "source still fades out completely"
+            Expect.floatClose acc (engine.BusGain Ambient) 0.0 "completion does not overwrite target mute with unity"
+            Engine.step engine 10.0 []
+            Expect.floatClose acc (engine.BusGain Ambient) 0.0 "the preserved mute is the committed base gain"
+        }
+
         test "Duck attenuates by amount over the attack then auto-restores (FR-004)" {
             let backend = mixing ()
             let engine = Engine.create (backend :> IAudioBackend)
