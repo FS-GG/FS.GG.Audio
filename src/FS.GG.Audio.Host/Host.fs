@@ -43,7 +43,8 @@ type Silence =
 type BackendKind =
     /// The bundled OpenAL backend, with a device actually open.
     | DeviceBacked
-    /// A record-only backend: it accepts every effect and plays none. `Silence` says why.
+    /// A Null backend: it accepts every effect and plays none. A deliberately requested one records
+    /// evidence; a device-unavailable fallback discards it. `Silence` says which one this is.
     | RecordOnly of Silence
     /// An `IAudioBackend` this library did not build — a product's own backend, or a test fake. We
     /// cannot say whether it reaches a device, and MUST NOT guess `DeviceBacked`: that is how the
@@ -623,22 +624,26 @@ module NullBackend =
 
     [<Sealed>]
     type T(silence: Silence) =
-        // A ResizeArray, NOT an AudioEvidence folded through `CoreAudio.record`. `record` appends to
-        // the TAIL of an F# list, so it copies everything already recorded on every call. Core's own
-        // comment justifies that — "Requested is a small per-frame batch, so the O(n) append is not a
-        // hot path" — and it is right about `interpret`, and wrong about THIS caller: a NullBackend is
-        // not a batch. It accumulates for the life of the process, so `n` is every effect ever played
-        // and the fold is quadratic in it.
+        // A DELIBERATE Null is an evidence recorder (FR-002); a SUBSTITUTED Null is the production
+        // degrade-to-silence path (FR-004). Nobody holding the latter asked for a recorder, and they
+        // cannot recover the device by reading or clearing its evidence, so retaining every effect
+        // there turns a graceful no-device fallback into an unbounded process-lifetime queue. Keep
+        // the test/CI contract, but make the production fallback a true no-op.
+        let recordsEvidence =
+            match silence with
+            | Silence.Requested -> true
+            | Silence.DeviceUnavailable _ -> false
+
+        // A ResizeArray, NOT an AudioEvidence folded through `CoreAudio.record`. For the deliberate
+        // recorder, `record` would append to the TAIL of an F# list and copy everything already
+        // recorded on every call. Core's "small per-frame batch" justification is right about
+        // `interpret`, but this instance accumulates until Clear and needs amortized O(1) append.
         //
         // Measured, one sfx per frame at 60fps: the same 20k plays cost 1.7s at the start of a session
         // and 16.9s once 120k frames (~33 min) are behind it — a 10x slowdown, still climbing, ~2.4
         // BILLION cons cells across the run. The cost is CPU, not heap; the retained list is only a
         // few MB, so this does not look like anything in a memory profile.
         //
-        // And it lands on the FR-004 degrade path. This is the default backend, and the one
-        // `OpenAlBackend.create` substitutes when no device opens — so the player it punishes is
-        // exactly the one FR-004 exists to protect: no sound card, promised a graceful degrade to
-        // silence, handed a game that gets slower the longer it is played.
         let recorded = ResizeArray<AudioEffect>()
         // The lock is here to REPAY what the ResizeArray costs, not to gold-plate. The field this
         // replaced was a `mutable` holding an IMMUTABLE value, so a reader racing a `Play` saw either
@@ -663,27 +668,23 @@ module NullBackend =
         // and the caller that does ask is a test asserting once.
         member _.Evidence = lock gate (fun () -> { Requested = List.ofSeq recorded })
 
-        // Drop everything recorded so far. Retaining every effect for the life of the instance is what
-        // makes this thing evidence, and it is also unbounded — so anything long-lived that holds one
-        // (a soak test; a shipped game that reached it through the FR-004 degrade) needs a way to say
-        // "I have read what I needed" and stop paying for the rest.
+        // Drop everything recorded so far. This only has work to do for a deliberate recorder; a
+        // substituted production fallback never adds anything.
         member _.Clear() = lock gate (fun () -> recorded.Clear())
 
         member _.RecordedCount = lock gate (fun () -> recorded.Count)
 
         interface IAudioBackend with
             member _.Play(effect: AudioEffect) =
-                // Normalize by DELEGATING to Core, not by re-clamping here. This type's contract is an
-                // equality — `Evidence` = `Core.Audio.interpret` of the same batch — and a second
-                // implementation of the clamp is a second thing to keep in agreement by hand.
-                // `interpret` of a one-effect batch IS that effect, normalized, and `normalize` is
-                // per-element and stateless, so appending them one at a time and interpreting them all
-                // at once agree by construction rather than by luck.
-                //
-                // Interpreted OUTSIDE the lock: it is pure, so it has no business in the critical
-                // section, which stays a single append.
-                let normalized = (CoreAudio.interpret [ effect ]).Requested
-                lock gate (fun () -> recorded.AddRange normalized)
+                if recordsEvidence then
+                    // Normalize by DELEGATING to Core, not by re-clamping here. The deliberate
+                    // recorder's contract is an equality — `Evidence` = `Core.Audio.interpret` of
+                    // the same batch — and a second clamp is a second implementation to drift.
+                    //
+                    // Interpreted OUTSIDE the lock: it is pure, so the critical section stays a
+                    // single append. The production fallback skips even this allocation.
+                    let normalized = (CoreAudio.interpret [ effect ]).Requested
+                    lock gate (fun () -> recorded.AddRange normalized)
             member _.Dispose() = ()
 
     let create () = new T()
@@ -1097,7 +1098,7 @@ module OpenAlBackend =
             // thing to do about it. How to write a TEST against this lives in the `.fsi` doc, where its
             // audience actually is — not here, in an end user's support log.
             eprintfn
-                "FS.GG.Audio.Host: OpenAL unavailable (%s) — using the record-only Null backend, so NOTHING this process plays will be audible. This is the deliberate degrade (FR-004), not a crash. Do not rely on seeing this line: ask Backend.isDeviceBacked and surface it in your own UI."
+                "FS.GG.Audio.Host: OpenAL unavailable (%s) — using the non-recording Null backend, so NOTHING this process plays will be audible. This is the deliberate degrade (FR-004), not a crash. Do not rely on seeing this line: ask Backend.isDeviceBacked and surface it in your own UI."
                 ex.Message
             new NullBackend.T(Silence.DeviceUnavailable ex.Message) :> IAudioBackend
 

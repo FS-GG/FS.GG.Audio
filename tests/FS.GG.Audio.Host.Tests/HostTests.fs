@@ -268,6 +268,32 @@ let tests =
                 "recording resumes after Clear"
         }
 
+        test "a substituted Null fallback discards effects instead of retaining them for process lifetime (#114)" {
+            // OpenAlBackend is deliberately total, so a machine with a working device cannot force
+            // its fallback through the public factory. Construct the same hidden mode reflectively:
+            // the Silence-carrying constructor is an implementation seam (absent from Host.fsi),
+            // and this test is the regression gate for the one production call site that uses it.
+            let constructor =
+                typeof<NullBackend.T>.GetConstructor(
+                    System.Reflection.BindingFlags.Instance ||| System.Reflection.BindingFlags.NonPublic,
+                    null,
+                    [| typeof<Silence> |],
+                    null)
+            let nb =
+                constructor.Invoke([| box (Silence.DeviceUnavailable "deterministic test failure") |])
+                :?> NullBackend.T
+            let backend = nb :> IAudioBackend
+            let effect = CoreAudio.playSfx (SoundId "discarded") 5.0
+            for _ in 1..100_000 do
+                backend.Play effect
+            Expect.equal nb.RecordedCount 0 "the production fallback never grows an evidence queue"
+            Expect.equal nb.Evidence CoreAudio.emptyEvidence "discarded fallback commands are not evidence"
+            Expect.equal
+                (Backend.kindOf backend)
+                (BackendKind.RecordOnly(Silence.DeviceUnavailable "deterministic test failure"))
+                "discarding history does not erase why the backend is silent"
+        }
+
         test "reading NullBackend.Evidence never throws while another thread is playing (report §3.3)" {
             // Guards a property that was FREE before the ResizeArray and had to be bought back. The
             // old field was a `mutable` holding an immutable value, so a reader racing a `Play` saw
@@ -322,6 +348,8 @@ let tests =
                     Expect.isFalse (backend :? NullBackend.T) "a device opened: this is not the Null fallback"
                     Expect.isTrue (backend :? IMixingBackend) "a real device backend implements IMixingBackend (#11)"
                 | BackendKind.RecordOnly(Silence.DeviceUnavailable reason) ->
+                    let fallback = backend :?> NullBackend.T
+                    Expect.equal fallback.RecordedCount 0 "the production fallback retains no commands"
                     Expect.isFalse
                         (System.String.IsNullOrWhiteSpace reason)
                         "the substitution carries the device's own reason, so the silence is explicable"
