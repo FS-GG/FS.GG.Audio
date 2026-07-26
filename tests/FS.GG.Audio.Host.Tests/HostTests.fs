@@ -268,7 +268,33 @@ let tests =
                 "recording resumes after Clear"
         }
 
-        test "a substituted Null fallback discards effects instead of retaining them for process lifetime (#114)" {
+        test "NullBackend diagnostics are raw, bounded, and independently cleared (#199)" {
+            let nb = NullBackend.create ()
+            let backend = nb :> IAudioBackend
+            let raw = PlaySfx(SoundId "raw", 2.5)
+            backend.Play raw
+
+            Expect.equal nb.Diagnostics.Recent [ raw ] "diagnostics preserve the raw request"
+            Expect.equal
+                nb.Evidence
+                (CoreAudio.interpret [ raw ])
+                "evidence remains the normalized audit trail"
+
+            nb.Clear()
+            Expect.equal nb.Evidence CoreAudio.emptyEvidence "Clear affects audit evidence"
+            Expect.equal nb.Diagnostics.Recent [ raw ] "Clear does not erase operational diagnostics"
+
+            backend.Play CoreAudio.stopMusic
+            nb.ClearDiagnostics()
+            Expect.equal nb.Diagnostics.Recent [] "ClearDiagnostics erases recent operations"
+            Expect.equal nb.Diagnostics.DroppedCount 0L "ClearDiagnostics resets the overwrite count"
+            Expect.equal
+                nb.Evidence
+                (CoreAudio.interpret [ CoreAudio.stopMusic ])
+                "ClearDiagnostics does not erase audit evidence"
+        }
+
+        test "a substituted Null fallback keeps only bounded recent diagnostics, not audit evidence (#114, #199)" {
             // OpenAlBackend is deliberately total, so a machine with a working device cannot force
             // its fallback through the public factory. Construct the same hidden mode reflectively:
             // the Silence-carrying constructor is an implementation seam (absent from Host.fsi),
@@ -283,11 +309,23 @@ let tests =
                 constructor.Invoke([| box (Silence.DeviceUnavailable "deterministic test failure") |])
                 :?> NullBackend.T
             let backend = nb :> IAudioBackend
-            let effect = CoreAudio.playSfx (SoundId "discarded") 5.0
-            for _ in 1..100_000 do
-                backend.Play effect
+            let total = 100_000
+            for i in 1..total do
+                backend.Play(PlaySfx(SoundId(string i), 5.0))
             Expect.equal nb.RecordedCount 0 "the production fallback never grows an evidence queue"
             Expect.equal nb.Evidence CoreAudio.emptyEvidence "discarded fallback commands are not evidence"
+            let diagnostics = nb.Diagnostics
+            let expected =
+                [ for i in total - NullBackend.DiagnosticCapacity + 1 .. total ->
+                      PlaySfx(SoundId(string i), 5.0) ]
+            Expect.equal
+                diagnostics.Recent
+                expected
+                "the diagnostic ring retains only the newest raw effects in chronological order"
+            Expect.equal
+                diagnostics.DroppedCount
+                (int64 (total - NullBackend.DiagnosticCapacity))
+                "the diagnostic reports exactly how much older history was overwritten"
             Expect.equal
                 (Backend.kindOf backend)
                 (BackendKind.RecordOnly(Silence.DeviceUnavailable "deterministic test failure"))
