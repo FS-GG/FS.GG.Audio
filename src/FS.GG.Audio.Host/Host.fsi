@@ -399,6 +399,20 @@ module Audio =
 [<RequireQualifiedAccess>]
 module NullBackend =
 
+    /// Maximum number of raw effects retained in a Null backend's diagnostic history.
+    [<Literal>]
+    val DiagnosticCapacity: int = 64
+
+    /// A bounded operational snapshot, separate from the deliberate recorder's audit Evidence.
+    type DiagnosticSnapshot =
+        {
+            /// Raw effects most recently presented to `IAudioBackend.Play`, oldest first. These are
+            /// not normalized through Core and never exceed `DiagnosticCapacity`.
+            Recent: AudioEffect list
+            /// Effects overwritten by the bounded ring since construction or `ClearDiagnostics`.
+            DroppedCount: int64
+        }
+
     /// A record-only backend: opens no device, never throws.
     ///
     /// Like every backend here it is NOT thread-safe and should be driven from one thread. It makes
@@ -427,8 +441,15 @@ module NullBackend =
         /// which answers the same question for ANY `IAudioBackend` without a type test.
         member Silence: Silence
         /// Drop everything recorded so far. `Evidence` is then empty until the next `Play` on a
-        /// deliberately requested recorder; this is a no-op on the bounded production fallback.
+        /// deliberately requested recorder. This does not clear the separate diagnostic history.
         member Clear: unit -> unit
+        /// Recent raw effects accepted by this silent backend, oldest first, plus the number
+        /// overwritten. This fixed-size operational history is available for both deliberately
+        /// requested recorders and device-unavailable fallbacks; it is not audit Evidence.
+        member Diagnostics: DiagnosticSnapshot
+        /// Clear only the bounded operational history and reset its dropped count. Deliberate
+        /// recorder Evidence is unchanged.
+        member ClearDiagnostics: unit -> unit
 
     /// Create a fresh Null backend. Its `Silence` is `Requested` — this is the deliberate,
     /// record-only backend, never a substitution.

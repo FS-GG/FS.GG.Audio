@@ -622,6 +622,15 @@ module Audio =
 [<RequireQualifiedAccess>]
 module NullBackend =
 
+    [<Literal>]
+    let DiagnosticCapacity = 64
+
+    /// A bounded snapshot of effects presented to a Null backend. Unlike Evidence, these are the
+    /// raw requests, retained only to explain recent silent execution.
+    type DiagnosticSnapshot =
+        { Recent: AudioEffect list
+          DroppedCount: int64 }
+
     [<Sealed>]
     type T(silence: Silence) =
         // A DELIBERATE Null is an evidence recorder (FR-002); a SUBSTITUTED Null is the production
@@ -645,6 +654,14 @@ module NullBackend =
         // few MB, so this does not look like anything in a memory profile.
         //
         let recorded = ResizeArray<AudioEffect>()
+        // Operational diagnostics and test evidence have deliberately different ownership:
+        // Evidence is the deliberate recorder's normalized audit trail and lives until Clear;
+        // diagnostics are raw, recent execution observations for either kind of Null. A fixed ring
+        // keeps the process-lifetime device fallback inspectable without recreating its old leak.
+        let diagnosticRing = Array.zeroCreate<AudioEffect> DiagnosticCapacity
+        let mutable diagnosticStart = 0
+        let mutable diagnosticCount = 0
+        let mutable diagnosticDropped = 0L
         // The lock is here to REPAY what the ResizeArray costs, not to gold-plate. The field this
         // replaced was a `mutable` holding an IMMUTABLE value, so a reader racing a `Play` saw either
         // the old snapshot or the new one and could not tear — a property callers had for free. A
@@ -658,6 +675,22 @@ module NullBackend =
         // property that used to hold, at ~20ns uncontended against a call a game makes a handful of
         // times a frame.
         let gate = obj ()
+        let recordDiagnostic effect =
+            if diagnosticCount < DiagnosticCapacity then
+                let index = (diagnosticStart + diagnosticCount) % DiagnosticCapacity
+                diagnosticRing[index] <- effect
+                diagnosticCount <- diagnosticCount + 1
+            else
+                diagnosticRing[diagnosticStart] <- effect
+                diagnosticStart <- (diagnosticStart + 1) % DiagnosticCapacity
+                diagnosticDropped <- diagnosticDropped + 1L
+
+        let diagnosticSnapshot () =
+            { Recent =
+                [ for offset in 0 .. diagnosticCount - 1 do
+                      yield diagnosticRing[(diagnosticStart + offset) % DiagnosticCapacity] ]
+              DroppedCount = diagnosticDropped }
+
         // The default is `Requested`: `create ()` is the product/test/CI backend asking for record-only
         // on purpose. Only `OpenAlBackend.create` builds one with `DeviceUnavailable`, and it is the
         // only caller that should — a substitution nobody asked for is the whole of #34.
@@ -674,17 +707,33 @@ module NullBackend =
 
         member _.RecordedCount = lock gate (fun () -> recorded.Count)
 
+        member _.Diagnostics = lock gate diagnosticSnapshot
+
+        member _.ClearDiagnostics() =
+            lock gate (fun () ->
+                diagnosticStart <- 0
+                diagnosticCount <- 0
+                diagnosticDropped <- 0L)
+
         interface IAudioBackend with
             member _.Play(effect: AudioEffect) =
-                if recordsEvidence then
-                    // Normalize by DELEGATING to Core, not by re-clamping here. The deliberate
-                    // recorder's contract is an equality — `Evidence` = `Core.Audio.interpret` of
-                    // the same batch — and a second clamp is a second implementation to drift.
-                    //
-                    // Interpreted OUTSIDE the lock: it is pure, so the critical section stays a
-                    // single append. The production fallback skips even this allocation.
-                    let normalized = (CoreAudio.interpret [ effect ]).Requested
-                    lock gate (fun () -> recorded.AddRange normalized)
+                // Normalize by DELEGATING to Core, not by re-clamping here. The deliberate
+                // recorder's contract is an equality — `Evidence` = `Core.Audio.interpret` of
+                // the same batch — and a second clamp is a second implementation to drift.
+                //
+                // Interpreted OUTSIDE the lock: it is pure, so the critical section stays short.
+                // The production fallback skips even this allocation.
+                let normalized =
+                    if recordsEvidence then
+                        Some((CoreAudio.interpret [ effect ]).Requested)
+                    else
+                        None
+
+                lock gate (fun () ->
+                    recordDiagnostic effect
+                    match normalized with
+                    | Some effects -> recorded.AddRange effects
+                    | None -> ())
             member _.Dispose() = ()
 
     let create () = new T()
