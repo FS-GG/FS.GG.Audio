@@ -2,8 +2,8 @@
 
   <!--
     FS.GG.Kit receiver (ADR-0062, .github#1262). This repo is a `coordination-kit` receiver: it holds
-    the shared coordination skills, the `fsgg-coord` client, and the engine tool manifest on disk. It
-    used to take them by byte-copy sync PR (`coordination-propagate`); it now REFERENCES the versioned
+    the shared coordination skills and the `fsgg-coord` client on disk. It used to take them by
+    byte-copy sync PR (`coordination-propagate`); it now REFERENCES the versioned
     `FS.GG.Kit` package and MATERIALIZES that kit onto disk from its pin. A hub change reaches this repo
     as an ordinary Renovate bump of the pin (in Directory.Packages.props), and `kit-materialize.yml`
     re-runs the materialize on that PR — the same shape lockfile-sync uses for packages.lock.json.
@@ -13,10 +13,50 @@
 
         dotnet build .config/kit/FS.GG.Kit.receiver.proj -t:FsggKitMaterialize
 
-    The materialized files (skills, scripts/fsgg-coord, .config/dotnet-tools.json) are COMMITTED: the
-    materialize is the write arm that replaces the byte-copy, not a live per-build input, so it does NOT
-    run on every build (FsggKitMaterializeOnBuild=false, per the .github#1280 review). The committed bytes
-    are content-addressed and byte-identical to canonical, so `coordination-coherence` stays green.
+    The materialized files (skills, scripts/fsgg-coord, scripts/skill-view, scripts/lib/args.sh,
+    scripts/lib/roots.sh) are COMMITTED: the materialize is the write arm that replaces the byte-copy,
+    not a live per-build input, so it does NOT run on every build (FsggKitMaterializeOnBuild=false, per
+    the .github#1280 review). The committed bytes are content-addressed and byte-identical to canonical,
+    so `coordination-coherence` stays green.
+
+    `.config/dotnet-tools.json` IS NOT IN THAT LIST, AND SINCE FS.GG.Kit 0.18.0 IT IS THIS REPO'S OWN
+    FILE (FS-GG/.github#1615, ADR-0068, 2026-07-28). That line named it until this change, and the claim
+    had gone false: #1615 deleted `dist/dotnet/.config/dotnet-tools.json` from the hub's `kit:` block, so
+    the materialize no longer writes the manifest, no longer owns its bytes, and no longer grades them —
+    this repo's materialized set went 28 files to 27. The file is still tracked here, unchanged; what
+    changed is who authors it. RENOVATE BUMPS `fs.gg.coord.cli` IN IT DIRECTLY now, with no hub
+    involvement: renovate's nuget manager ships `/(^|/)dotnet-tools\.json$/` as one of its four
+    `managerFilePatterns`, so .github/renovate.json's `extends` of the org preset is already enough and
+    nothing here has to opt in. That is the whole point of #1615 — the kit is content-addressed, so
+    bumping the engine by one integer used to edit kit content, stale `registry/repos.lock`, red
+    `kit-published-coherence` on the hub's `main`, and oblige a republish plus a seven-receiver fan-out
+    to move one version string in one JSON file.
+
+    EDITING THIS FILE BY HAND IS NOW POSSIBLE, WHICH IS EXACTLY WHY A CENTRAL ASSERTION REPLACED THE
+    ARRANGEMENT. While the manifest was a kit row, "a repo that receives the `fsgg-coord` shim can
+    actually run the engine that shim execs" (#1077) held BY CONSTRUCTION — the two rows rode one
+    fabric and `repos.sh validate` refused to let them separate. Ownership moving here dissolves that
+    guarantee, so ADR-0068 replaced it with `scripts/repos-audit.sh`'s ENGINE-MANIFEST SWEEP, which
+    runs daily (repos-audit.yml, 08:17 UTC) over EVERY `coordination-kit` receiver's actual
+    `.config/dotnet-tools.json` and asserts it declares `fs.gg.coord.cli` with a usable version.
+    Deleting this file, or dropping the `fs.gg.coord.cli` entry out of it, is therefore CAUGHT
+    CENTRALLY AND BY NAME within a day — not discovered by somebody here whose `fsgg-coord` invocation
+    dies at tool resolution. The replacement is strictly stronger than the rule it retired: the old one
+    was f(hub roster) and could never read this tree, so a receiver that hand-deleted its own manifest
+    stayed green forever. Note what the sweep deliberately does NOT assert — that the pinned engine is
+    the NEWEST published one. #1077's invariant was "can run the engine at all", and widening it would
+    red the fleet on the day the engine ships a version.
+
+    AND THIS REPO IS NOT AN INCIDENTAL SUBJECT OF THAT SWEEP — IT IS ONE OF THE TWO IT WAS WRITTEN FOR.
+    Before #1077 the manifest rode the `build-config` fabric (4 receivers) while the `fsgg-coord` shim
+    rode the coordination kit (6), and FS.GG.Audio and FS.GG.Templates were the two in the gap: they
+    held the shim and had NO ENGINE TO EXEC. That is not an accident of rollout and it is not fixed by
+    onboarding us — as the block below says, this repo deliberately does NOT `receive: build-config`,
+    because it hand-authors its own Directory.Build.props / Directory.Packages.props, and ADR-0068
+    explicitly rejected "move the manifest to build-config and onboard Templates and Audio" for that
+    reason. So the structural reason we were #1077's victim is still true today, and the sweep is the
+    only thing standing where the co-fabric rule used to. A future reader wondering why a daily hub job
+    reads this repo's tool manifest is looking at the answer: this repo is the case.
 
     This repo does NOT `receive: build-config` (it hand-authors its own Directory.Build.props /
     Directory.Packages.props), so FsggKitMaterializeBuildConfig stays off (its default) — the kit
@@ -28,7 +68,9 @@
     RESOLVED from `.claude/skills` at checkout instead of being a second committed copy of the same
     bytes. See the FsggKitViewSkillRoots block below and FsggAudioGenerateSkillView at the bottom.
     `coordination-coherence` narrows with it — 51 graded files to 28, measured — and stays green,
-    because it derives its roots from FsggKitSkillRoots.
+    because it derives its roots from FsggKitSkillRoots. (Both numbers are AT KIT 0.17.0, which is what
+    was measured. The count is 27 at 0.18.0: the retired `.config/dotnet-tools.json` row above is the
+    28th file, and it is now this repo's own rather than a graded one.)
 
     THIS REPO'S OWN 16 SKILLS WERE IN BOTH ROOTS AND STAY VISIBLE IN BOTH. Unlike FS.GG.Templates
     (whose audited roots held only the kit's four), Audio's `.claude/skills` and `.agents/skills` each
