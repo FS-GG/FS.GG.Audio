@@ -67,10 +67,11 @@
          seven-receiver fan-out for a path rename. See FS-GG/.github
          `docs/coordination/skill-apparatus-retirement-order.md` §3.
 
-         BOTH PROPERTIES ARE DECLARED EXPLICITLY, AND THAT IS LOAD-BEARING. `scripts/check-skill-view-roots.sh`
-         grades their union on this repo's required `Build + test` check and fails CLOSED on an absent
-         property — because an undeclared property would silently evaluate to the package default and
-         hide exactly the regression that alarm exists for. -->
+         BOTH PROPERTIES ARE DECLARED EXPLICITLY, AND THAT IS LOAD-BEARING.
+         `scripts/skill-view check` (with the `receiver-proj` flag) grades their union on this repo's
+         required `Build + test` check and fails CLOSED on an absent property — because an undeclared
+         property would silently evaluate to the package default and hide exactly the regression that
+         alarm exists for. -->
     <FsggKitSkillRoots>.claude/skills</FsggKitSkillRoots>
     <FsggKitViewSkillRoots>.agents/skills</FsggKitViewSkillRoots>
 
@@ -108,7 +109,7 @@
 
     The `Condition` guards on the PROPERTY, so if a later change empties FsggKitViewSkillRoots this
     target stops running with it instead of generating a view nothing asserts. That same emptying is
-    what `scripts/check-skill-view-roots.sh` reds on.
+    what `scripts/skill-view check` (with the `receiver-proj` flag) reds on.
   -->
   <Target Name="FsggAudioGenerateSkillView" BeforeTargets="FsggKitCheckSkillView"
           Condition="'$(FsggKitViewSkillRoots)' != ''">
