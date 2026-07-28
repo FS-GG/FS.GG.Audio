@@ -30,15 +30,25 @@
 #
 # WHY A STANDALONE SCRIPT AND NOT A COMPOSITION LANE. FS.GG.Templates put the same assertion in
 # `tests/composition/lib/`, because it has a `composition` harness that is its required check. This
-# repo has no such harness: `gate.yml`'s header records the required set as exactly two contexts —
-# `Build + test (locked restore, net10.0, headless)` and `lock-ranges / lock-ranges` — of which only
-# the first is authored here (the second is a reusable workflow in FS-GG/.github). `kit /
-# coordination-kit` REPORTS on PRs here and is deliberately NOT required, which matters below: it is
-# the context the kit's own view-root assertion arrives on. So the alarm is a script this repo owns,
-# invoked as a step in the one required job this repo authors. Same assertion, same can-fire
-# discipline, wired to the required check this repo actually has. (FS.GG.Game rides
+# repo has no such harness: its required contexts are `Build + test (locked restore, net10.0,
+# headless)`, `lock-ranges / lock-ranges` and `kit / coordination-kit`, and only the first is authored
+# here. So the alarm is a script this repo owns, invoked as a step in that job. Same assertion, same
+# can-fire discipline, wired to the required check this repo actually has. (FS.GG.Game rides
 # `build-config-drift`; FS.GG.Net's landed as a check run that is NOT required, FS-GG/.github#1727.
 # Collapsing the three hand-copies is FS-GG/.github#1710.)
+#
+# THAT LIST IS THE ONE FROM THE API, NOT THE ONE FROM `gate.yml` (read 2026-07-28 while fixing
+# FS.GG.Audio#212):
+#
+#   $ gh api repos/FS-GG/FS.GG.Audio/branches/main/protection
+#   contexts: ["Build + test (locked restore, net10.0, headless)", "lock-ranges / lock-ranges",
+#              "kit / coordination-kit"]        enforce_admins: true
+#
+# `gate.yml`'s own header says "Protection now requires exactly two contexts" and calls `kit /
+# coordination-kit` "deliberately NOT required". Protection says otherwise, and protection is the
+# thing that blocks merges. That prose is FS.GG.Audio#211's subject, not this file's — recorded here
+# only because the note in the view lane below turns on which of the two is true, and it must turn on
+# the measured one.
 #
 # IT GRADES THE DECLARATION, NOT MSBUILD'S EVALUATION, and that is deliberate rather than lazy. The
 # faithful alternative is `dotnet msbuild -getProperty:` on the receiver project, which needs a RESTORE
@@ -186,16 +196,29 @@ assert_runtime_roots_can_fire() {
 # is covered by a gate that already exists; this lane owns the shapes that are present-but-wrong, which
 # nothing else looks at.
 #
-# THAT COVERAGE IS WEAKER HERE THAN IN FS.GG.Game AND THE DIFFERENCE IS WORTH NAMING. Game's alarm rides
-# `build-config-drift`, the same required job that drives `-t:FsggKitMaterialize`, so `FsggKitCheckSkillView`
-# reds the SAME required context. This repo's materialize runs in `kit-materialize.yml` and reports
-# through `kit / coordination-kit`, which gate.yml's header records as deliberately NOT required. So an
-# absent view root here is caught on the materialize path (every Renovate kit bump, and every local
-# `dotnet build .config/kit/FS.GG.Kit.receiver.proj -t:FsggKitMaterialize`) rather than on a blocking
-# check. That is still a loud failure on the path that would introduce it — the view root only becomes
-# permanently absent if the generate target is removed, and removing it reds the very build that removal
-# lives in — but it is not the required-context coverage Game has. Recorded, not silently accepted:
-# FS-GG/.github#1710 owns collapsing these three hand-copies, and this is one input to that decision.
+# THAT COVERAGE IS WEAKER HERE THAN IN FS.GG.Game AND THE DIFFERENCE IS WORTH NAMING, because a reader
+# who assumes Game's answer holds here will be wrong. Game's alarm rides `build-config-drift`, the SAME
+# required job that drives `-t:FsggKitMaterialize` — so on Game `FsggKitCheckSkillView` reds a required
+# context. On Audio no required context runs the materialize at all. Measured on this tree, 2026-07-28:
+#
+#   * `FsggKitCheckSkillView` DOES fire, and hard. With `FsggAudioGenerateSkillView` unwired and
+#     `.agents/skills` deleted:
+#       `dotnet build .config/kit/FS.GG.Kit.receiver.proj -t:FsggKitMaterialize`
+#       -> error : FS.GG.Kit: view skill root '.agents/skills' is ABSENT or a DANGLING link. …
+#          Build FAILED, 1 Error(s).
+#   * But nothing required RUNS it. `kit / coordination-kit` IS a required context (see the API read
+#     above) — it just does not materialize: it runs `coordination-sync --check --against-pin`, which
+#     grades `<FsggKitSkillRoots>` bytes only and is measured GREEN on a tree with the view root gone
+#     (this file's header, above). The job that does run the materialize is
+#     `materialize / Materialize the kit from its pin` in `kit-materialize.yml`, which is NOT in the
+#     required set and reports `skipping` on an ordinary PR — observed on the PR that landed this fix.
+#
+# So on Audio an absent view root is caught on the MATERIALIZE PATH (every Renovate kit bump, and every
+# local `dotnet build … -t:FsggKitMaterialize`) rather than on any blocking check. That is still a loud
+# failure on the path that would introduce it — the root only becomes permanently absent if
+# `FsggAudioGenerateSkillView` is removed, and removing it reds the very build that removal lives in —
+# but it is NOT the required-context coverage Game has. Recorded, not silently accepted:
+# FS-GG/.github#1710 owns collapsing these three hand-copies, and this asymmetry is one input to it.
 #
 # THE DANGLING LINK IS A FINDING, AND GETTING THAT RIGHT NEEDED A CORRECTION (FS.GG.Audio#212).
 # `[[ -e ]]` FOLLOWS symlinks, so a dangling link answers `! -e` exactly as a missing path does — and
