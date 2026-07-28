@@ -33,7 +33,22 @@
 # repo has no such harness: its required contexts are `Build + test (locked restore, net10.0,
 # headless)`, `lock-ranges / lock-ranges` and `kit / coordination-kit`, and only the first is authored
 # here. So the alarm is a script this repo owns, invoked as a step in that job. Same assertion, same
-# can-fire discipline, wired to the required check this repo actually has.
+# can-fire discipline, wired to the required check this repo actually has. (FS.GG.Game rides
+# `build-config-drift`; FS.GG.Net's landed as a check run that is NOT required, FS-GG/.github#1727.
+# Collapsing the three hand-copies is FS-GG/.github#1710.)
+#
+# THAT LIST IS THE ONE FROM THE API, NOT THE ONE FROM `gate.yml` (read 2026-07-28 while fixing
+# FS.GG.Audio#212):
+#
+#   $ gh api repos/FS-GG/FS.GG.Audio/branches/main/protection
+#   contexts: ["Build + test (locked restore, net10.0, headless)", "lock-ranges / lock-ranges",
+#              "kit / coordination-kit"]        enforce_admins: true
+#
+# `gate.yml`'s own header says "Protection now requires exactly two contexts" and calls `kit /
+# coordination-kit` "deliberately NOT required". Protection says otherwise, and protection is the
+# thing that blocks merges. That prose is FS.GG.Audio#211's subject, not this file's — recorded here
+# only because the note in the view lane below turns on which of the two is true, and it must turn on
+# the measured one.
 #
 # IT GRADES THE DECLARATION, NOT MSBUILD'S EVALUATION, and that is deliberate rather than lazy. The
 # faithful alternative is `dotnet msbuild -getProperty:` on the receiver project, which needs a RESTORE
@@ -169,19 +184,68 @@ assert_runtime_roots_can_fire() {
 }
 
 # THE VIEW IS ACTUALLY THERE, not merely declared. The declaration check above cannot see a checkout
-# whose view root was never generated; this can. It is scoped to the case where the root exists on
-# disk, because `Build + test` runs on a bare checkout that has NOT run the kit materialize — so an
-# absent view root here is the NORMAL state of that job, not a regression, and reddening it would make
-# this alarm fire on every green build. When the root IS present (a developer tree, or any job that
-# materialized first) it must resolve to the live root and expose the same skills.
+# whose view root was never generated; this can.
+#
+# NOTHING AT THE PATH AT ALL is the one shape that is NOT a finding here, and only that one. This step
+# is the FIRST step of `build-test`, on a bare `actions/checkout` that has NOT run the kit materialize,
+# so an unpopulated view root is the NORMAL state of that job and reddening it would fire the alarm on
+# every green build. It is also the shape that REPAIRS ITSELF: `FsggAudioGenerateSkillView` regenerates
+# the view before `FsggKitCheckSkillView` asserts it on the next materialize, and if that generate is
+# ever removed the kit's own `FsggKitCheckSkillView` FAILS the materialize — measured on a fresh clone
+# at the retirement commit, "view skill root '.agents/skills' is ABSENT or a DANGLING link". So absence
+# is covered by a gate that already exists; this lane owns the shapes that are present-but-wrong, which
+# nothing else looks at.
+#
+# THAT COVERAGE IS WEAKER HERE THAN IN FS.GG.Game AND THE DIFFERENCE IS WORTH NAMING, because a reader
+# who assumes Game's answer holds here will be wrong. Game's alarm rides `build-config-drift`, the SAME
+# required job that drives `-t:FsggKitMaterialize` — so on Game `FsggKitCheckSkillView` reds a required
+# context. On Audio no required context runs the materialize at all. Measured on this tree, 2026-07-28:
+#
+#   * `FsggKitCheckSkillView` DOES fire, and hard. With `FsggAudioGenerateSkillView` unwired and
+#     `.agents/skills` deleted:
+#       `dotnet build .config/kit/FS.GG.Kit.receiver.proj -t:FsggKitMaterialize`
+#       -> error : FS.GG.Kit: view skill root '.agents/skills' is ABSENT or a DANGLING link. …
+#          Build FAILED, 1 Error(s).
+#   * But nothing required RUNS it. `kit / coordination-kit` IS a required context (see the API read
+#     above) — it just does not materialize: it runs `coordination-sync --check --against-pin`, which
+#     grades `<FsggKitSkillRoots>` bytes only and is measured GREEN on a tree with the view root gone
+#     (this file's header, above). The job that does run the materialize is
+#     `materialize / Materialize the kit from its pin` in `kit-materialize.yml`, which is NOT in the
+#     required set and reports `skipping` on an ordinary PR — observed on the PR that landed this fix.
+#
+# So on Audio an absent view root is caught on the MATERIALIZE PATH (every Renovate kit bump, and every
+# local `dotnet build … -t:FsggKitMaterialize`) rather than on any blocking check. That is still a loud
+# failure on the path that would introduce it — the root only becomes permanently absent if
+# `FsggAudioGenerateSkillView` is removed, and removing it reds the very build that removal lives in —
+# but it is NOT the required-context coverage Game has. Recorded, not silently accepted:
+# FS-GG/.github#1710 owns collapsing these three hand-copies, and this asymmetry is one input to it.
+#
+# THE DANGLING LINK IS A FINDING, AND GETTING THAT RIGHT NEEDED A CORRECTION (FS.GG.Audio#212).
+# `[[ -e ]]` FOLLOWS symlinks, so a dangling link answers `! -e` exactly as a missing path does — and
+# the first cut of this file, shipped at `52a358f`, therefore reported a dangling
+# `.agents/skills -> ../.claude/skills-that-do-not-exist` as "no generated view root on this checkout",
+# GREEN, exit 0, with the `! -d` branch that carried the dangling message UNREACHABLE for the case it
+# named. Measured on a fresh clone of this repo at `52a358f` before the fix. That is ADR-0067 §8's own
+# headline class passing the alarm written to catch it, so the test below is `! -e && ! -L`: absent
+# means absent, and a link that resolves to nothing is a link that resolves to nothing. FS.GG.Game found
+# it while copying this file (FS-GG/.github#1734, `b1d4fbd`) and fixed it there first; this is the same
+# repair brought home.
+#
+# The `root` parameter exists so the can-fire demo below can drive THIS FUNCTION over fixture trees
+# rather than re-implementing its predicate — see the note on that demo.
 assert_view_resolves() {
-  local lane="$1" view="$REPO_ROOT/.agents/skills" live="$REPO_ROOT/.claude/skills" live_n view_n
-  if [[ ! -e "$view" ]]; then
-    ok "$lane: no generated view root on this checkout (expected on a bare clone — the kit materialize generates it); declaration graded above"
+  local lane="$1" root="${2:-$REPO_ROOT}" view live live_n view_n
+  view="$root/.agents/skills" live="$root/.claude/skills"
+  if [[ ! -e "$view" && ! -L "$view" ]]; then
+    ok "$lane: no generated view root on this checkout (expected on a bare clone — the kit materialize generates it, and reds if it cannot); declaration graded above"
+    return
+  fi
+  if [[ -L "$view" && ! -e "$view" ]]; then
+    bad "$lane: .agents/skills is a DANGLING symlink — it resolves to zero skills and BOTH runtimes exit 0 saying nothing (ADR-0067 §8). Regenerate it: bash scripts/skill-view generate --source .claude/skills --roots .agents/skills"
     return
   fi
   if [[ ! -d "$view" ]]; then
-    bad "$lane: .agents/skills exists but is not a directory — a DANGLING view link resolves to zero skills and BOTH runtimes exit 0 saying nothing (ADR-0067 §8)."
+    bad "$lane: .agents/skills exists but is not a directory. A COMMITTED symlink checks out as a plain text file under 'git -c core.symlinks=false' (ADR-0067 §6) and both runtimes then load zero skills silently. The view root must be generated, never committed."
     return
   fi
   live_n="$(find "$live" -mindepth 1 -maxdepth 1 -type d | wc -l)"
@@ -193,10 +257,72 @@ assert_view_resolves() {
   fi
 }
 
+# assert_view_resolves_can_fire <lane>
+# The same can-fire discipline for the SECOND lane, and the reason it is not optional. `assert_runtime_roots`
+# shipped with a six-fixture demo and was correct; `assert_view_resolves` shipped with NO demo and was
+# wrong on its own headline case for a whole day (FS.GG.Audio#212). The lane with the proof held and the
+# lane without it did not, in the same file, on the same day — so the rule this file now keeps is that
+# every lane demonstrates it can fire, and the demo drives the ASSERTION rather than only the predicate:
+# a demo that exercises only the predicate survives a mutation of the `bad` arm.
+#
+# Offline and local: five fixture trees in a temp dir, each a `.claude/skills` holding two skills plus one
+# shape of `.agents/skills`, with the counters snapshotted and restored.
+assert_view_resolves_can_fire() {
+  local lane="$1" tmp saved_pass saved_fail t
+  tmp="$(mktemp -d)"
+  saved_pass="$PASS" saved_fail="$FAIL"
+
+  local ok_cases=0 fired=0
+
+  mk() {  # mk <name> -> echoes a tree root holding two live skills
+    local t="$tmp/$1"
+    mkdir -p "$t/.claude/skills/alpha" "$t/.claude/skills/beta" "$t/.agents"
+    printf '%s' "$t"
+  }
+
+  # (1) a resolving view over the same population -> PASS. The shape a materialized tree has.
+  t="$(mk resolving)"; ln -s ../.claude/skills "$t/.agents/skills"
+  PASS=0 FAIL=0; assert_view_resolves "$lane" "$t" >/dev/null
+  [[ "$FAIL" -eq 0 && "$PASS" -eq 1 ]] && ok_cases=$((ok_cases + 1))
+
+  # (2) nothing at the path at all -> PASS. The bare-checkout shape `build-test` actually runs in;
+  #     see the note above for what covers it instead.
+  t="$(mk absent)"
+  PASS=0 FAIL=0; assert_view_resolves "$lane" "$t" >/dev/null
+  [[ "$FAIL" -eq 0 && "$PASS" -eq 1 ]] && ok_cases=$((ok_cases + 1))
+
+  # (3) a DANGLING link -> RED. ADR-0067 §8's headline class, and the one this lane got wrong at
+  #     `52a358f` — green, exit 0, with the branch naming it unreachable.
+  t="$(mk dangling)"; ln -s ../.claude/skills-that-do-not-exist "$t/.agents/skills"
+  PASS=0 FAIL=0; assert_view_resolves "$lane" "$t" >/dev/null
+  [[ "$FAIL" -eq 1 ]] && fired=$((fired + 1))
+
+  # (4) a plain FILE where the root belongs -> RED. What a COMMITTED symlink degrades to under
+  #     `git -c core.symlinks=false`, measured in ADR-0067 §6: exit 0, zero skills, no diagnostic.
+  t="$(mk textfile)"; printf '../.claude/skills' > "$t/.agents/skills"
+  PASS=0 FAIL=0; assert_view_resolves "$lane" "$t" >/dev/null
+  [[ "$FAIL" -eq 1 ]] && fired=$((fired + 1))
+
+  # (5) a PARTIAL view -> RED. A real directory holding fewer skills than the live root.
+  t="$(mk partial)"; mkdir -p "$t/.agents/skills/alpha"
+  PASS=0 FAIL=0; assert_view_resolves "$lane" "$t" >/dev/null
+  [[ "$FAIL" -eq 1 ]] && fired=$((fired + 1))
+
+  PASS="$saved_pass" FAIL="$saved_fail"
+  rm -rf "$tmp"
+
+  if [[ "$ok_cases" -eq 2 && "$fired" -eq 3 ]]; then
+    ok "$lane: the view-resolution alarm can fire — 3 of 3 regressions RED (dangling link, text file, partial view) and 2 of 2 legal shapes GREEN"
+  else
+    bad "$lane: the view-resolution alarm is NOT demonstrably live — $ok_cases/2 legal shapes passed and $fired/3 regressions fired. A gate that cannot fire is not a gate (FS-GG/.github#1611 category D)."
+  fi
+}
+
 printf 'skill-view-roots: the runtime skill-root contract (ADR-0011 / ADR-0065 / ADR-0067 §8)\n'
 assert_runtime_roots          "roots"
-assert_runtime_roots_can_fire "can-fire"
+assert_runtime_roots_can_fire "can-fire(roots)"
 assert_view_resolves          "view"
+assert_view_resolves_can_fire "can-fire(view)"
 
 printf 'skill-view-roots: %d passed, %d failed\n' "$PASS" "$FAIL"
 [[ "$FAIL" -eq 0 ]] || exit 1
