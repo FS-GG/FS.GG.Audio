@@ -84,7 +84,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # THE RUNTIME SKILL-ROOT CONTRACT (ADR-0067 §8, FS-GG/.github#1720/#1710/#1777).
+      # THE RUNTIME SKILL-ROOT CONTRACT (ADR-0067 §8, FS-GG/.github#1720/#1710/#1777, #215).
       #
       # `.agents/skills` is a generated VIEW root since phase 4 stage 3, not a second committed copy.
       # That retirement removed the only gate that would have noticed the root later LEAVING this
@@ -118,8 +118,54 @@ jobs:
       # does rather than a copy of it: 16 cases, each negative one asserting the SPECIFIC diagnostic
       # class its branch emits. #212 survived a day precisely because the lane that shipped it had no
       # demo while the lane beside it in the same file had one and was correct.
+      #
+      # AND IT IS THE CAN-FIRE DEMO FOR THE LANE FS.GG.Audio#215 ARMED BELOW. Its lane-2 case
+      # `an ABSENT view root, with no --absent-ok — RED with [absent-root]` is exactly the assertion
+      # the `--absent-ok` removal below now leans on, driven over a fixture tree, and `selftest_case`
+      # is mutation-proof by construction in BOTH directions: a case that exits 0 fails with "this
+      # lane CANNOT FIRE", and a case that reds for the WRONG class fails with "the right class was
+      # not named". Its sibling `an ABSENT view root, excused by --absent-ok with a reason — exit 0`
+      # is this job's OLD behaviour, still demonstrated and still green, so the flag's effect is
+      # asserted rather than assumed and the two verdicts are held apart by the demo rather than by
+      # this comment.
       - name: Demonstrate every lane of the skill-root alarm can fire
         run: bash scripts/skill-view selftest
+
+      # THE VIEW ROOT IS RESOLVED HERE, UNCONDITIONALLY, SO THAT THE STEP BELOW HAS A SUBJECT
+      # (FS.GG.Audio#215).
+      #
+      # `.agents/skills` is git-ignored by construction (ADR-0067 §6.1), so it is ABSENT in this
+      # checkout exactly as it is in every fresh clone and every new worktree. Until this step
+      # existed, this job — the only required context this repo authors — had to EXCUSE that absence
+      # with `--absent-ok`, and a lane that excuses its own subject asserts nothing about it. No
+      # required context on this repo graded the view root at all; that is the gap #215 names, and
+      # this step is what closes it.
+      #
+      # IT IS UNCONDITIONAL AND MUST NEVER BECOME "generate it if it is missing". The generate is
+      # authorised by this repo DECLARING the root to be a view — `<FsggKitViewSkillRoots>` in
+      # `.config/kit/FS.GG.Kit.receiver.proj` — never by observing that one is absent. That is a rule
+      # about AUTHORISATION, not about reachability: FS-GG/.github#1869 measured that BOTH forms leave
+      # the root present by the time the check runs, so neither preserves `[absent-root]` as this
+      # job's verdict. What this job asserts is that the GENERATE SUCCEEDED and the SOURCE IS
+      # COMPLETE. Both are real and both can fail — `[text-file-root]` reds right here, via
+      # `generate`'s own refusal, before the check runs at all.
+      #
+      # A WORKFLOW STEP IS THE ONLY PLACE IT CAN GO FOR THIS JOB, and it is the same conclusion
+      # FS.GG.SDD, FS.GG.Rendering and FS.GG.Governance reached for their `skill-view-check` jobs.
+      # `FsggAudioGenerateSkillView` in the receiver project covers every tree the MATERIALIZE runs in
+      # — `kit-materialize.yml` and every local `-t:FsggKitMaterialize` — and this job runs neither:
+      # it is a bare `actions/checkout` that never invokes MSBuild on the receiver project. Making it
+      # do so would put a NETWORK RESTORE of the pinned FS.GG.Kit in front of a required check, which
+      # this file argues against at length below. The two generates are therefore complementary, not
+      # duplicates, and FS-GG/.github#1869 AC4 is explicit that the receiver-side target stays until
+      # that row is decided — this step does not license removing it.
+      #
+      # `--roots` NAMES THE VIEW ROOT EXPLICITLY, exactly as `FsggKitViewSkillRoots` does for the
+      # materializer. Letting the tool fall back to ADR-0011's default pair would also try to resolve
+      # `.claude/skills`, this repo's TRACKED live root, and `generate` refuses a tracked root with no
+      # override — a refusal, not a no-op.
+      - name: Resolve the view root this tree does not commit
+        run: bash scripts/skill-view generate --source .claude/skills --roots ".agents/skills"
 
       # `--receiver-proj` is LANE 1, THE DECLARATION, and it is what replaces the deleted script: the
       # sorted union of <FsggKitSkillRoots> and <FsggKitViewSkillRoots> must be ADR-0011's two roots,
@@ -128,40 +174,61 @@ jobs:
       # compared directory COUNTS; lane 3 is `[tracked-view-root]`, adopted from FS.GG.Net's copy and
       # had by none of the others.
       #
-      # `--absent-ok` IS THIS REPO'S GENUINE DIVERGENCE, AND IT COSTS A MEASUREMENT TO USE. The flag
-      # REQUIRES a reason and prints it on every run, because what else catches an absent root DIFFERS
-      # PER RECEIVER. Measured on THIS repo, 2026-07-28 — do not import FS.GG.Game's answer, which is
-      # different:
+      # THERE IS NO `--absent-ok` HERE ANY MORE, AND THAT IS THE WHOLE OF FS.GG.Audio#215.
+      #
+      # It used to carry one, and the reason it gave was true when it was written and is quoted here
+      # because it is what changed. Measured on THIS repo, 2026-07-28:
       #
       #   $ gh api repos/FS-GG/FS.GG.Audio/branches/main/protection
       #       contexts: ["Build + test (locked restore, net10.0, headless)",
       #                  "lock-ranges / lock-ranges", "kit / coordination-kit"]
-      #       enforce_admins: true
+      #       enforce_admins: true                      (re-read unchanged 2026-07-29)
       #
       #   * NO required context runs `-t:FsggKitMaterialize`. `kit / coordination-kit` runs
       #     `coordination-sync --check --against-pin`, which grades <FsggKitSkillRoots> BYTES ONLY
       #     (FS-GG/.github#1584) and is green on a tree with the view root gone. The job that does
       #     materialize is `materialize / Materialize the kit from its pin` in `kit-materialize.yml`,
       #     which is NOT required and reports `skipping` on an ordinary PR.
-      #   * THIS job is a bare `actions/checkout` that never materializes and never generates, so an
-      #     unpopulated `.agents/skills` is its NORMAL state; reddening it would fire on every green
-      #     build.
-      #   * What covers absence instead is the MATERIALIZE PATH — every kit bump PR and every local
-      #     `dotnet build … -t:FsggKitMaterialize`, where `FsggKitCheckSkillView` fails hard: measured
-      #     with `FsggAudioGenerateSkillView` unwired and the root deleted, "view skill root
-      #     '.agents/skills' is ABSENT or a DANGLING link", Build FAILED.
+      #   * THIS job never materialized and never generated, so an unpopulated `.agents/skills` was
+      #     its NORMAL state, and reddening it would have fired on every green build.
+      #   * Absence was therefore left to the MATERIALIZE PATH, where `FsggKitCheckSkillView` fails
+      #     hard — on jobs branch protection does not require.
       #
-      # That is FS.GG.Templates' posture, not FS.GG.Game's — on Game the alarm rides the same required
-      # job that drives the materialize, so `FsggKitCheckSkillView` reds a required context there and
-      # does not here. The asymmetry is recorded rather than silently accepted; FS-GG/.github#1727 is
-      # the open row about required-context placement.
+      # BOTH BULLETS ONE AND THREE STILL HOLD. What #215 changed is bullet two: the step above now
+      # generates the view, so absence is no longer this job's normal state, and excusing it would
+      # make this lane unfalsifiable over the very root it names. Measured on a bare checkout of this
+      # tree, 2026-07-29, with the generate step REMOVED and everything else identical:
+      #
+      #   rc=1  ::error::skill-view: [absent-root] .agents/skills does not exist.
+      #   rc=0  (with the generate) OK — 20 declared skill(s) visible in every one of 2 root(s)
+      #
+      # So a required context finally grades the view root on every pull request. What it grades is
+      # the GENERATE and the SOURCE, not absence-in-the-abstract (FS-GG/.github#1869) — a view root is
+      # absent in every fresh checkout by construction, so no required check over one can ever report
+      # absence as its verdict, and pretending otherwise is the advertised-alarm-that-cannot-ring
+      # shape of epic #266.
+      #
+      # WHAT THIS DOES **NOT** DO, SAID OUT LOUD. Deleting `FsggAudioGenerateSkillView` from the
+      # receiver project still does not red this context — the step above generates independently of
+      # it. #215's acceptance criteria asked for exactly that guard; it is not built, deliberately.
+      # FS-GG/.github#1867 put a `FsggKitGenerateSkillView` in the kit itself (0.19.0,
+      # AfterTargets=FsggKitMaterialize), so on the materialize path the receiver-side copy becomes
+      # redundant the moment this repo's pin reaches 0.19.x — #218 is that open bump, and this repo
+      # pinned 0.18.0 when the line was written. FS-GG/.github#1869 is then the OPEN, undecided row on
+      # whether the seven per-receiver copies survive at all. A check that reds when one is removed
+      # would pin a MECHANISM
+      # that is under review, in the one direction the hub is moving. The invariant worth requiring is
+      # the one above: the runtime contract this repo ships resolves, whoever generated it.
+      #
+      # FS-GG/.github#1727 remains the open row about required-context placement across receivers; on
+      # FS.GG.Game the alarm rides the required job that drives the materialize, which this repo has
+      # no equivalent of.
       - name: Runtime skill-root contract
         run: |
           bash scripts/skill-view check \
             --source .claude/skills \
             --tree . \
-            --receiver-proj .config/kit/FS.GG.Kit.receiver.proj \
-            --absent-ok "this job is a bare actions/checkout that never materializes and never generates, so an ungenerated view root is its normal state; NO required context on this repo runs -t:FsggKitMaterialize (protection contexts read from the API 2026-07-28), so absence is caught on the materialize path instead — every kit bump PR and every local materialize, where FsggKitCheckSkillView fails hard. A DANGLING root is NOT excused by this (FS.GG.Audio#212)." 
+            --receiver-proj .config/kit/FS.GG.Kit.receiver.proj
 
       - uses: actions/setup-dotnet@v6
         with:
