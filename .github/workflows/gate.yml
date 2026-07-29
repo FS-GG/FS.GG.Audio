@@ -243,9 +243,9 @@ jobs:
       # receiver project still does not red this context — the step above generates independently of
       # it. #215's acceptance criteria asked for exactly that guard; it is not built, deliberately.
       # FS-GG/.github#1867 put a `FsggKitGenerateSkillView` in the kit itself (0.19.0,
-      # AfterTargets=FsggKitMaterialize), so on the materialize path the receiver-side copy becomes
-      # redundant the moment this repo's pin reaches 0.19.x — #218 is that open bump, and this repo
-      # pinned 0.18.0 when the line was written. FS-GG/.github#1869 is then the OPEN, undecided row on
+      # AfterTargets=FsggKitMaterialize), so on the materialize path the receiver-side copy IS ALREADY
+      # REDUNDANT: #218 landed the pin at 0.19.1 (`c36b75c`) an hour after #215's change was written
+      # against 0.18.0. FS-GG/.github#1869 is then the OPEN, undecided row on
       # whether the seven per-receiver copies survive at all. A check that reds when one is removed
       # would pin a MECHANISM that is under review, in the one direction the hub is already moving,
       # and it would grade a proxy — an MSBuild target's existence — rather than the runtime contract.
