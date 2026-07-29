@@ -147,8 +147,18 @@ jobs:
       # about AUTHORISATION, not about reachability: FS-GG/.github#1869 measured that BOTH forms leave
       # the root present by the time the check runs, so neither preserves `[absent-root]` as this
       # job's verdict. What this job asserts is that the GENERATE SUCCEEDED and the SOURCE IS
-      # COMPLETE. Both are real and both can fail — `[text-file-root]` reds right here, via
-      # `generate`'s own refusal, before the check runs at all.
+      # COMPLETE. Both are real and both can fail: a `.agents/skills` that is a plain FILE — the
+      # committed symlink ADR-0067 §6 rejects — reds HERE, at exit 2, with `refusing to replace
+      # '.agents/skills': it exists, is not a symlink, and carries no .skill-view receipt`. Note the
+      # CLASS NAME is not `[text-file-root]`: that tag is emitted only inside `check`'s classify loop,
+      # which this step's refusal now precedes, so §8's three absence classes are unreachable AS
+      # VERDICTS OF THIS JOB. They stay mutation-proven where fixtures do not generate — the selftest
+      # above, and FS-GG/.github's own `src/FS.GG.Kit/verify-package.sh`. Saying that plainly is the
+      # #212 lesson: a job that names a class it cannot emit sends the reader to the wrong repair.
+      #
+      # `generate` NEEDS `python3` (it computes the relative symlink target), and `need_cmd` DIES
+      # rather than falling back to `--mode copy`, so on a runner without it this required context is
+      # RED, not degraded. `ubuntu-latest` ships it; nothing else in this job did before.
       #
       # A WORKFLOW STEP IS THE ONLY PLACE IT CAN GO FOR THIS JOB, and it is the same conclusion
       # FS.GG.SDD, FS.GG.Rendering and FS.GG.Governance reached for their `skill-view-check` jobs.
@@ -160,10 +170,25 @@ jobs:
       # duplicates, and FS-GG/.github#1869 AC4 is explicit that the receiver-side target stays until
       # that row is decided — this step does not license removing it.
       #
-      # `--roots` NAMES THE VIEW ROOT EXPLICITLY, exactly as `FsggKitViewSkillRoots` does for the
-      # materializer. Letting the tool fall back to ADR-0011's default pair would also try to resolve
-      # `.claude/skills`, this repo's TRACKED live root, and `generate` refuses a tracked root with no
-      # override — a refusal, not a no-op.
+      # `--roots` NAMES THIS STEP'S SUBJECT EXPLICITLY, and the reason is precedence, NOT refusal.
+      # Omitting it is a working no-op-plus-generate today — `lib/roots.sh` would fall back to
+      # ADR-0011's pair, and `generate` answers `.claude/skills: identity (this root IS the source) —
+      # nothing to generate` rather than refusing it (the identity question is asked BEFORE the
+      # tracked one, deliberately, `scripts/skill-view`). What the fallback costs is control: that
+      # chain is `--roots` > `$AGENT_SKILL_ROOTS` > `.agent-skill-roots` > the default, so an env var
+      # or a dotfile could move a REQUIRED context's subject without touching this file. Naming it
+      # here closes that.
+      #
+      # THE PAIR BELOW IS A SECOND COPY OF THE DECLARATION THE NEXT STEP GRADES, AND IT MUST MOVE WITH
+      # IT. `check --receiver-proj` REFUSES a `--roots` alongside it — "grading one set and resolving
+      # another" is the bug it names — but `generate` has no `--receiver-proj` mode, so every workflow
+      # caller in the fleet hand-writes this pair (FS.GG.SDD, FS.GG.Rendering, FS.GG.Governance too).
+      # Filed as FS-GG/.github#1893. Until it lands, a change to `<FsggKitSkillRoots>` or
+      # `<FsggKitViewSkillRoots>` must change this line in the SAME commit. It does not fail silently
+      # if you forget — measured on this tree, 2026-07-29 — but it fails pointing at the declaration
+      # rather than at this argument: a root ADDED reds `[roots-declaration]`, and the legal ADR-0065
+      # disposition swap (same union, properties exchanged, which lane 1 passes on purpose) reds
+      # `[tracked-view-root] '.claude/skills' … git TRACKS 39 path(s)`.
       - name: Resolve the view root this tree does not commit
         run: bash scripts/skill-view generate --source .claude/skills --roots ".agents/skills"
 
@@ -183,6 +208,12 @@ jobs:
       #       contexts: ["Build + test (locked restore, net10.0, headless)",
       #                  "lock-ranges / lock-ranges", "kit / coordination-kit"]
       #       enforce_admins: true                      (re-read unchanged 2026-07-29)
+      #
+      # THAT IS THREE CONTEXTS, AND THE TOP OF THIS FILE STILL SAYS TWO. The header block's
+      # "Protection now requires exactly two contexts" and its "`kit / coordination-kit` … deliberately
+      # NOT required" are both false against the reading above, which #215's change re-verified rather
+      # than introduced. It is #211's subject and is deliberately left alone here; this note exists so
+      # a reader who meets the contradiction is not left to resolve it themselves.
       #
       #   * NO required context runs `-t:FsggKitMaterialize`. `kit / coordination-kit` runs
       #     `coordination-sync --check --against-pin`, which grades <FsggKitSkillRoots> BYTES ONLY
@@ -216,9 +247,10 @@ jobs:
       # redundant the moment this repo's pin reaches 0.19.x — #218 is that open bump, and this repo
       # pinned 0.18.0 when the line was written. FS-GG/.github#1869 is then the OPEN, undecided row on
       # whether the seven per-receiver copies survive at all. A check that reds when one is removed
-      # would pin a MECHANISM
-      # that is under review, in the one direction the hub is moving. The invariant worth requiring is
-      # the one above: the runtime contract this repo ships resolves, whoever generated it.
+      # would pin a MECHANISM that is under review, in the one direction the hub is already moving,
+      # and it would grade a proxy — an MSBuild target's existence — rather than the runtime contract.
+      # The invariant worth requiring is the one above: this repo's runtime contract resolves,
+      # whoever generated it.
       #
       # FS-GG/.github#1727 remains the open row about required-context placement across receivers; on
       # FS.GG.Game the alarm rides the required job that drives the materialize, which this repo has
