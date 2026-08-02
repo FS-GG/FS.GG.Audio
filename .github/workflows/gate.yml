@@ -156,27 +156,57 @@ jobs:
       # duplicates, and FS-GG/.github#1869 AC4 is explicit that the receiver-side target stays until
       # that row is decided — this step does not license removing it.
       #
-      # `--roots` NAMES THIS STEP'S SUBJECT EXPLICITLY, and the reason is precedence, NOT refusal.
-      # Omitting it is a working no-op-plus-generate today — `lib/roots.sh` would fall back to
-      # ADR-0011's pair, and `generate` answers `.claude/skills: identity (this root IS the source) —
-      # nothing to generate` rather than refusing it (the identity question is asked BEFORE the
-      # tracked one, deliberately, `scripts/skill-view`). What the fallback costs is control: that
-      # chain is `--roots` > `$AGENT_SKILL_ROOTS` > `.agent-skill-roots` > the default, so an env var
-      # or a dotfile could move a REQUIRED context's subject without touching this file. Naming it
-      # here closes that.
+      # `--receiver-proj .config/kit/FS.GG.Kit.receiver.proj` NAMES THIS STEP'S SUBJECT FROM THE SAME
+      # DECLARATION `check --receiver-proj` GRADES TWO STEPS BELOW (FS.GG.Audio#226), not a hand-copied
+      # `--source`/`--roots` pair. Before this, a change to `<FsggKitSkillRoots>` or
+      # `<FsggKitViewSkillRoots>` had to independently update the literal pair spelled HERE — and until
+      # FS-GG/.github#1893 shipped `generate --receiver-proj`, `generate` had no mode that read the
+      # declaration directly, so every workflow caller in the fleet (FS.GG.SDD, FS.GG.Rendering,
+      # FS.GG.Governance too) hand-wrote it. Forgetting was not silent: measured on this tree,
+      # 2026-07-29, against the retired hand-copied form, a root ADDED reds `[roots-declaration]` and
+      # the legal ADR-0065 disposition swap (same union, properties exchanged) reds
+      # `[tracked-view-root] '.claude/skills' … git TRACKS 39 path(s)` — but BOTH verdicts land two
+      # steps downstream, at `check`, after this step has already generated the wrong pair. That is the
+      # root cause #226 names: the duplication, not any single missed edit.
       #
-      # THE PAIR BELOW IS A SECOND COPY OF THE DECLARATION THE NEXT STEP GRADES, AND IT MUST MOVE WITH
-      # IT. `check --receiver-proj` REFUSES a `--roots` alongside it — "grading one set and resolving
-      # another" is the bug it names — but `generate` has no `--receiver-proj` mode, so every workflow
-      # caller in the fleet hand-writes this pair (FS.GG.SDD, FS.GG.Rendering, FS.GG.Governance too).
-      # Filed as FS-GG/.github#1893. Until it lands, a change to `<FsggKitSkillRoots>` or
-      # `<FsggKitViewSkillRoots>` must change this line in the SAME commit. It does not fail silently
-      # if you forget — measured on this tree, 2026-07-29 — but it fails pointing at the declaration
-      # rather than at this argument: a root ADDED reds `[roots-declaration]`, and the legal ADR-0065
-      # disposition swap (same union, properties exchanged, which lane 1 passes on purpose) reds
-      # `[tracked-view-root] '.claude/skills' … git TRACKS 39 path(s)`.
+      # `--receiver-proj` makes the drift unrepresentable rather than merely caught later: this step
+      # and `check` below now resolve the SAME file, so there is no second copy left to forget. It is
+      # refused alongside `--source`/`--roots` by construction (`generate`'s own usage line:
+      # `(--source <dir> | --receiver-proj <file>)`), so the precedence concern the old `--roots` flag
+      # existed to pin — an env var or a dotfile moving a required context's subject without touching
+      # this file — cannot recur either: the declaration is the whole input set.
       - name: Resolve the view root this tree does not commit
-        run: bash scripts/skill-view generate --source .claude/skills --roots ".agents/skills"
+        run: bash scripts/skill-view generate --receiver-proj .config/kit/FS.GG.Kit.receiver.proj
+
+      # FS.GG.Audio#226. Pins that the invocation above literally reads the declared `--receiver-proj`
+      # form, not a hand-copied `--source`/`--roots` pair that could silently drift from
+      # `.config/kit/FS.GG.Kit.receiver.proj` on a legal ADR-0065 disposition change. Reads THIS
+      # workflow file verbatim, so it is directly revert-sensitive to the step above.
+      #
+      # ON ITS OWN THIS WOULD ONLY PIN TEXT — the trap named in #226: a string assertion proves nothing
+      # about resolution. It is deliberately paired with `skill-view selftest` above (`Demonstrate
+      # every lane of the skill-root alarm can fire`), whose "generate declaration mode" lanes
+      # (`.github#1893`) already run `generate --receiver-proj` against a fixture tree with live/view
+      # roots SWAPPED and assert it follows the new declaration, plus a case proving `--source`/
+      # `--roots` cannot override one. That selftest step runs BEFORE this one in this same job, so the
+      # behavioural half of the falsifiability claim is a real command already executed against real
+      # fixtures, not a second hand-maintained list asserted against this one.
+      - name: Pin the skill-view generate invocation text (FS.GG.Audio#226)
+        run: |
+          set -euo pipefail
+          expected='bash scripts/skill-view generate --receiver-proj .config/kit/FS.GG.Kit.receiver.proj'
+          actual="$(grep -m1 -E '^[[:space:]]*run:[[:space:]]*bash scripts/skill-view generate' .github/workflows/gate.yml \
+                     | sed 's/^[[:space:]]*run:[[:space:]]*//; s/[[:space:]]*$//')"
+          if [ "$actual" != "$expected" ]; then
+            echo "::error::gate.yml's skill-view generate step reads '$actual', expected '$expected' (FS.GG.Audio#226 — reverted to a hand-copied --source/--roots pair?)"
+            exit 1
+          fi
+          case "$actual" in
+            *--source*|*--roots*)
+              echo "::error::gate.yml's skill-view generate step still names --source/--roots directly: '$actual'"
+              exit 1 ;;
+          esac
+          echo "ok: gate.yml's generate step reads '$expected'"
 
       # `--receiver-proj` is LANE 1, THE DECLARATION, and it is what replaces the deleted script: the
       # sorted union of <FsggKitSkillRoots> and <FsggKitViewSkillRoots> must be ADR-0011's two roots,
