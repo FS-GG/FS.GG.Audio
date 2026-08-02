@@ -8,19 +8,29 @@ name: gate
 # lane (#42), the readme/pack check (#8), the lock-range coherence gate (#54) — ran, reported, and
 # BLOCKED NOTHING. A red gate was advisory: the repo's own recurring defect one level up, not a gate
 # that reports green over a missing subject but a gate whose verdict had no subject to act on.
-# Protection now requires exactly two contexts:
+#
+# What protection currently requires lives OUT OF TREE, in repo settings, and this very paragraph has
+# already drifted from it once (FS.GG.Audio#211): it used to claim "exactly two contexts" and call
+# `kit / coordination-kit` "deliberately NOT required" when the API said otherwise. Do not trust a
+# transcribed list here without re-running the command that answers it:
+#
+#     gh api repos/FS-GG/FS.GG.Audio/branches/main/protection
+#
+# Measured 2026-08-02, it returned THREE required contexts, with enforce_admins on:
 #
 #     Build + test (locked restore, net10.0, headless)   <- the build-test job's `name:`
 #     lock-ranges / lock-ranges                          <- `<job id> / <reusable workflow's job name>`
+#     kit / coordination-kit                              <- coordination-coherence.yml's job; REQUIRED,
+#                                                             not merely reporting (see the runtime
+#                                                             skill-root contract step below for what
+#                                                             that context does and does not grade)
 #
 # Those strings are the binding, they are matched LITERALLY, and they live in repo settings — out of
 # tree, which is both why this file cannot enforce them and why this comment can drift from them.
 # The trap that buys: renaming a job does not RELABEL its required check, it makes that check stop
 # REPORTING — and a context that never reports is never satisfied, so every PR blocks forever on a
-# check that will never arrive, with enforce_admins on and no bypass. Rename `build-test`'s `name:`
-# and the contexts must move in the same change:
-#
-#     gh api repos/FS-GG/FS.GG.Audio/branches/main/protection
+# check that will never arrive, with enforce_admins on and no bypass. Rename any of the three jobs'
+# `name:` (or, for the reusable ones, their job id) and the contexts must move in the same change.
 #
 # And only HALF of `lock-ranges / lock-ranges` is ours to rename. The second segment is the job id
 # INSIDE FS-GG/.github's lock-range-coherence.yml, which the `uses:` below tracks at the moving ref
@@ -30,9 +40,6 @@ name: gate
 # filed as FS-GG/.github#549, which asks for the check that would ASSERT this (every required context
 # is one that something still reports) instead of leaving it to whoever remembers to read this
 # comment — the same "assert, don't remember" the lock-ranges block below is built on.
-#
-# `kit / coordination-kit` reports on PRs here but is deliberately NOT required, matching
-# FS.GG.SDD and FS.GG.Rendering: both report it, neither gates on it.
 
 on:
   push:
@@ -186,13 +193,12 @@ jobs:
       #   $ gh api repos/FS-GG/FS.GG.Audio/branches/main/protection
       #       contexts: ["Build + test (locked restore, net10.0, headless)",
       #                  "lock-ranges / lock-ranges", "kit / coordination-kit"]
-      #       enforce_admins: true                      (re-read unchanged 2026-07-29)
+      #       enforce_admins: true          (re-read unchanged 2026-07-29, and again 2026-08-02)
       #
-      # THAT IS THREE CONTEXTS, AND THE TOP OF THIS FILE STILL SAYS TWO. The header block's
-      # "Protection now requires exactly two contexts" and its "`kit / coordination-kit` … deliberately
-      # NOT required" are both false against the reading above, which #215's change re-verified rather
-      # than introduced. It is #211's subject and is deliberately left alone here; this note exists so
-      # a reader who meets the contradiction is not left to resolve it themselves.
+      # THAT IS THREE CONTEXTS. The header block used to say two, and to call `kit / coordination-kit`
+      # "deliberately NOT required" — both false against the reading above, which #215's change
+      # re-verified rather than introduced. FS.GG.Audio#211 corrected the header to match this
+      # reading; what follows is left as the record of that drift, not as a live contradiction.
       #
       #   * NO required context runs `-t:FsggKitMaterialize`. `kit / coordination-kit` runs
       #     `coordination-sync --check --against-pin`, which grades <FsggKitSkillRoots> BYTES ONLY
