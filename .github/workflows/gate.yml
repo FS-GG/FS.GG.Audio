@@ -117,6 +117,34 @@ jobs:
       - name: Demonstrate every lane of the skill-root alarm can fire
         run: bash scripts/skill-view selftest
 
+      # The invocation below is the receiver's production source of truth.  Keep its invalid-input
+      # controls immediately adjacent: a text pin can prove it still spells `--receiver-proj`, but
+      # only these commands prove the installed tool rejects retired, mismatched, and unrecognised
+      # arguments before the real invocation restores this checkout's generated view.
+      - name: Prove skill-view generate rejects invalid receiver invocations (FS.GG.Audio#237)
+        run: |
+          set -euo pipefail
+          expect_rejected() {
+            local label="$1"
+            shift
+            if "$@"; then
+              echo "::error::skill-view generate accepted $label"
+              exit 1
+            fi
+            echo "ok: skill-view generate rejected $label"
+          }
+          expect_rejected "retired --source alongside --receiver-proj" \
+            bash scripts/skill-view generate \
+              --receiver-proj .config/kit/FS.GG.Kit.receiver.proj \
+              --source .claude/skills
+          expect_rejected "a non-receiver project" \
+            bash scripts/skill-view generate \
+              --receiver-proj src/FS.GG.Audio.Core/FS.GG.Audio.Core.fsproj
+          expect_rejected "an unknown flag" \
+            bash scripts/skill-view generate \
+              --receiver-proj .config/kit/FS.GG.Kit.receiver.proj \
+              --unknown-receiver-flag
+
       # THE VIEW ROOT IS RESOLVED HERE, UNCONDITIONALLY, SO THAT THE STEP BELOW HAS A SUBJECT
       # (FS.GG.Audio#215).
       #
