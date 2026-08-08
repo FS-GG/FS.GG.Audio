@@ -13,7 +13,7 @@
          .config/kit/FS.GG.Kit.receiver.proj, which materializes the kit onto disk; Renovate bumps
          this pin and kit-materialize.yml refreshes the committed kit on that PR. -->
     <PackageVersion Include="FS.GG.Kit" Version="0.41.0" />
-    <PackageVersion Include="FSharp.Core" Version="10.1.301" />
+    <PackageVersion Include="FSharp.Core" Version="10.1.302" />
     <!-- FS.GG.Audio.Host: real OpenAL backend. MIT managed bindings; the OpenAL Soft native
          (LGPL) ships via the .Soft.Native runtime package, dynamically linked + replaceable. -->
     <PackageVersion Include="Silk.NET.OpenAL" Version="2.23.0" />
