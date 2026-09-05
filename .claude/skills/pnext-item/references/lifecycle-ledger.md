@@ -94,7 +94,7 @@ and user-steered continuations do not collapse into one misleading final row. Pu
 content digest such as `codex-session-jsonl:sha256:<digest>`, never an absolute local path. Run:
 
 ```sh
-python3 .agents/skills/pnext-item/scripts/collect-runtime-usage.py codex \
+scripts/fsgg-coord telemetry usage collect codex \
   --session-file <rollout.jsonl> --task <item/phase> --turn-id <turn-id> \
   --coord-version <version> --sdd-version <version> --contracts-version <version> \
   --all-responses --append <private-untracked-phase-usage.csv>
@@ -126,7 +126,7 @@ terminal, then:
 
 1. resolves the named local session/transcript and confirms its terminal usage record was written after
    the child's last response;
-2. runs `collect-runtime-usage.py` into a new private immutable receipt scoped only to that phase;
+2. runs `fsgg-coord telemetry usage collect` into a new private immutable receipt scoped only to that phase;
 3. seals and posts the terminal lifecycle event with `measured` usage and the receipt digest; and
 4. rejects the handoff, host acceptance, cycle completion, or Done while that seal is absent.
 
@@ -146,12 +146,12 @@ Seal, post, and export without hand-authoring digests or editing accepted commen
 ````sh
 set -euo pipefail
 gh api repos/<owner>/<repo>/issues/<number>/comments --paginate --slurp > <comments.json>
-python3 .agents/skills/pnext-item/scripts/validate-lifecycle-log.py \
-  --run <run-id> --unit <unit-id> --export-comments <comments.json> > <exported-lifecycle.jsonl>
-python3 .agents/skills/pnext-item/scripts/validate-lifecycle-log.py \
-  --root . --run <run-id> --unit <unit-id> --existing <exported-lifecycle.jsonl> \
-  --seal-successor <one-unposted-event-without-chain-fields.json> \
-  --usage <every-cited-private-phase-receipt.csv> > <one-sealed-successor.json>
+scripts/fsgg-coord telemetry lifecycle export-comments \
+  --run <run-id> --unit <unit-id> --comments <comments.json> --output <exported-lifecycle.jsonl>
+scripts/fsgg-coord telemetry lifecycle seal-successor \
+  --run <run-id> --unit <unit-id> --existing <exported-lifecycle.jsonl> \
+  --draft <one-unposted-event-without-chain-fields.json> \
+  --usage <every-cited-private-phase-receipt.csv> --output <one-sealed-successor.json>
 event="$(<one-sealed-successor.json>)"
 test -n "$event"
 printf '<!-- fsgg:item-lifecycle/v1 -->\n```json\n%s\n```\n' "$event" > <owned-comment-file>
@@ -168,12 +168,13 @@ Run the validator at each handoff and gate. A normal item uses any stable lowerc
 `unit_id`; a roadmap supplies its cycle values:
 
 ```sh
-python3 .agents/skills/pnext-item/scripts/validate-lifecycle-log.py \
-  --root . --run <run-id> --unit <unit-id> --log <exported-lifecycle.jsonl> \
+scripts/fsgg-coord telemetry lifecycle validate \
+  --run <run-id> --unit <unit-id> --log <exported-lifecycle.jsonl> \
   --usage <private-phase-1.csv> --usage <private-phase-2.csv> \
   [--history-report <validated-history.csv>]
 ```
 
 Use `--require-terminal --require-reconciled` before a done stamp or roadmap roll-up. The first rejects an
-active or blocked phase; the second rejects terminal `pending` token usage. Run both scripts' `--self-test`
-after changing them.
+active or blocked phase; the second keeps the explicit completion intent visible even though the compiled
+validator already rejects every terminal `pending` token record. Validate implementation changes through
+the CLI test suite and the frozen black-box parity corpus.
