@@ -10,9 +10,9 @@
       },
       "FSharp.Core": {
         "type": "Direct",
-        "requested": "[10.1.301, )",
-        "resolved": "10.1.301",
-        "contentHash": "excLf2zM/qUB3WhRUfI0xvOOaPwcRAEdYT/BXe9eiTKySnWVuIKMQTf5+6ETy5nsb1dpLp1s2j2yAM/XcRgFMg=="
+        "requested": "[10.1.400, )",
+        "resolved": "10.1.400",
+        "contentHash": "H9wlZ/tWgNp+Q4WQ5aUSi3XOBXrL6z+UkR0PNeyDFyoZR3c3PbtA21B9FqlthrhEwQ6f5AtQV0JLhBBDqjjscw=="
       },
       "Microsoft.DotNet.PlatformAbstractions": {
         "type": "Transitive",
@@ -36,7 +36,7 @@
       "fs.gg.audio.core": {
         "type": "Project",
         "dependencies": {
-          "FSharp.Core": "[10.1.301, )"
+          "FSharp.Core": "[10.1.400, )"
         }
       },
       "fs.gg.audio.elmish": {
@@ -46,7 +46,7 @@
           "FS.GG.Audio.Core": "[0.5.0, )",
           "FS.GG.Audio.Engine": "[0.5.0, )",
           "FS.GG.Audio.Host": "[0.5.0, )",
-          "FSharp.Core": "[10.1.301, )"
+          "FSharp.Core": "[10.1.400, )"
         }
       },
       "fs.gg.audio.engine": {
@@ -54,14 +54,14 @@
         "dependencies": {
           "FS.GG.Audio.Core": "[0.5.0, )",
           "FS.GG.Audio.Host": "[0.5.0, )",
-          "FSharp.Core": "[10.1.301, )"
+          "FSharp.Core": "[10.1.400, )"
         }
       },
       "fs.gg.audio.host": {
         "type": "Project",
         "dependencies": {
           "FS.GG.Audio.Core": "[0.5.0, )",
-          "FSharp.Core": "[10.1.301, )",
+          "FSharp.Core": "[10.1.400, )",
           "Silk.NET.OpenAL": "[2.23.0, )",
           "Silk.NET.OpenAL.Soft.Native": "[1.23.1, )"
         }
