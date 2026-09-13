@@ -7,7 +7,19 @@
     <Version>$(FsGgAudioVersion)</Version>
     <Authors>FS-GG</Authors>
     <Description>Pure, BCL-only audio request vocabulary (SoundId/TrackId/AudioEffect/AudioEvidence plus a record-only interpreter) — the bottom layer of the FS.GG.Audio component. Extracted verbatim from FS.GG.UI.Canvas.Audio.</Description>
+    <PackageTags>fs-gg;audio;fsharp;fable-javascript</PackageTags>
   </PropertyGroup>
+
+  <PropertyGroup>
+    <FablePackageType>library</FablePackageType>
+  </PropertyGroup>
+  <Target Name="CurateFableCompatibilityView" AfterTargets="CreateFablePackageFiles">
+    <ItemGroup>
+      <_PackageFiles Remove="@(_PackageFiles)" />
+      <_PackageFiles Include="Audio.fsi;Audio.fs" Pack="true" PackagePath="fable/%(Filename)%(Extension)" BuildAction="None" />
+      <_PackageFiles Include="Fable/FS.GG.Audio.Core.fsproj" Pack="true" PackagePath="fable/FS.GG.Audio.Core.fsproj" BuildAction="None" />
+    </ItemGroup>
+  </Target>
 
   <ItemGroup>
     <Compile Include="Audio.fsi" />
@@ -17,6 +29,7 @@
   <!-- FR-006: FSharp.Core is the ONLY dependency, pinned via CPM to the org common 10.1.301. -->
   <ItemGroup>
     <PackageReference Include="FSharp.Core" />
+    <PackageReference Include="Fable.Package.SDK" PrivateAssets="all" IncludeAssets="runtime; build; native; contentfiles; analyzers; buildtransitive" />
   </ItemGroup>
 
 </Project>

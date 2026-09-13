@@ -1,0 +1,39 @@
+name: web-audio-browser
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  browser-graph:
+    name: Web Audio graph (packed Fable + three browsers)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: tests/WebAudio.Browser.Tests/package-lock.json
+      - name: Install browser families and system dependencies
+        working-directory: tests/WebAudio.Browser.Tests
+        run: |
+          npm ci
+          node node_modules/playwright-core/cli.js install --with-deps chromium firefox webkit
+      - name: Exercise the exact packed browser-audio candidate
+        run: tests/WebAudio.Browser.Tests/run.sh "$RUNNER_TEMP/web-audio"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: web-audio-browser-observation
+          path: ${{ runner.temp }}/web-audio.*.json
+          if-no-files-found: error

@@ -3,10 +3,12 @@
   <Project Path="src/FS.GG.Audio.Host/FS.GG.Audio.Host.fsproj" />
   <Project Path="src/FS.GG.Audio.Elmish/FS.GG.Audio.Elmish.fsproj" />
   <Project Path="src/FS.GG.Audio.Engine/FS.GG.Audio.Engine.fsproj" />
+  <Project Path="src/FS.GG.Audio.WebBrowser/FS.GG.Audio.WebBrowser.fsproj" />
   <Project Path="samples/FS.GG.Audio.Sample/FS.GG.Audio.Sample.fsproj" />
   <Project Path="samples/FS.GG.Audio.Showcase/FS.GG.Audio.Showcase.fsproj" />
   <Project Path="tests/FS.GG.Audio.Core.Tests/FS.GG.Audio.Core.Tests.fsproj" />
   <Project Path="tests/FS.GG.Audio.Host.Tests/FS.GG.Audio.Host.Tests.fsproj" />
+  <Project Path="tests/FS.GG.Audio.WebBrowser.Tests/FS.GG.Audio.WebBrowser.Tests.fsproj" />
   <Project Path="tests/FS.GG.Audio.Elmish.Tests/FS.GG.Audio.Elmish.Tests.fsproj" />
   <Project Path="tests/FS.GG.Audio.Engine.Tests/FS.GG.Audio.Engine.Tests.fsproj" />
 </Solution>

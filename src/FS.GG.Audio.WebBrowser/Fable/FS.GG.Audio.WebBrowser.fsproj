@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>FS.GG.Audio.WebBrowser.Fable.Metadata</AssemblyName>
+    <IsPackable>false</IsPackable>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <EnableDefaultItems>false</EnableDefaultItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="WebAudio.fsi" />
+    <Compile Include="WebAudio.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="FS.GG.Audio.Core" />
+    <PackageReference Include="Fable.Browser.Dom" />
+  </ItemGroup>
+</Project>
