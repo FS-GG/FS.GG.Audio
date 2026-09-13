@@ -10,6 +10,7 @@ so audio is testable headless.
 | Package | What it is | Depends on |
 |---|---|---|
 | **FS.GG.Audio.Core** | Pure request vocabulary (`AudioEffect`, `Bus`, `SoundId`/`TrackId`) + a record-only interpreter (`AudioEvidence`). BCL-only. | FSharp.Core |
+| **FS.GG.Audio.WebBrowser** | Gesture-gated Web Audio realization with decoded assets, buses, bounded voices, music, pan and deterministic disposal. | Core, Fable.Browser.Dom |
 | **FS.GG.Audio.Host** | The `IAudioBackend` device seam + a deterministic Null/record backend and a real OpenAL (Silk.NET) backend that degrades to Null with no device. Optional `IMixingBackend` for mixing/spatial control. | Core, Silk.NET.OpenAL, Silk.NET.OpenAL.Soft.Native † |
 | **FS.GG.Audio.Engine** | Mixing/voice layer: named buses (Master/Music/Sfx/Ui/Ambient), linear fades + equal-power cross-fades, side-chain ducking, 3D listener/emitters. Pure deterministic `Engine.step`. | Host †, Core |
 | **FS.GG.Audio.Elmish** | Thin Elmish `Cmd` authoring bridge (`Audio.Cmd.playSfx …`) over the host. Never depends on `FS.GG.UI`. | Host †, Core, Elmish |
@@ -40,6 +41,7 @@ Start with the entry package:
 
 ```sh
 dotnet add package FS.GG.Audio.Core
+dotnet add package FS.GG.Audio.WebBrowser
 ```
 
 Then add the layers you need — the device host, the mixing engine, and the Elmish
@@ -51,7 +53,7 @@ dotnet add package FS.GG.Audio.Engine
 dotnet add package FS.GG.Audio.Elmish
 ```
 
-The [Quick start](#quick-start) below needs Core, Host and Engine; the full package
+The browser package consumes Core directly and carries no native code. The [Quick start](#quick-start) below needs Core, Host and Engine; the full package
 map — what each layer is and what it depends on — is the [Packages](#packages) table
 above. **Host, Engine and Elmish redistribute the OpenAL Soft native library
 (LGPL-2.0-or-later); Core does not** — see

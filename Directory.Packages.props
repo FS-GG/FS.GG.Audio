@@ -14,6 +14,9 @@
          this pin and kit-materialize.yml refreshes the committed kit on that PR. -->
     <PackageVersion Include="FS.GG.Kit" Version="0.88.0" />
     <PackageVersion Include="FSharp.Core" Version="10.1.301" />
+    <PackageVersion Include="Fable.Package.SDK" Version="1.4.0" />
+    <PackageVersion Include="Fable.Browser.Dom" Version="2.20.0" />
+    <PackageVersion Include="FS.GG.Audio.Core" Version="$(FsGgAudioVersion)" />
     <!-- FS.GG.Audio.Host: real OpenAL backend. MIT managed bindings; the OpenAL Soft native
          (LGPL) ships via the .Soft.Native runtime package, dynamically linked + replaceable. -->
     <PackageVersion Include="Silk.NET.OpenAL" Version="2.23.0" />

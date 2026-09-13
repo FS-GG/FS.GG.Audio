@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <IsPackable>true</IsPackable>
+    <PackageId>FS.GG.Audio.WebBrowser</PackageId>
+    <Version>$(FsGgAudioVersion)</Version>
+    <Description>Gesture-gated Web Audio host and portable ownership policy for FS.GG.Audio effects.</Description>
+    <PackageTags>fs-gg;audio;browser;fable-javascript</PackageTags>
+    <FablePackageType>library</FablePackageType>
+  </PropertyGroup>
+  <Target Name="CurateFableCompatibilityView" AfterTargets="CreateFablePackageFiles">
+    <ItemGroup>
+      <_PackageFiles Remove="@(_PackageFiles)" />
+      <_PackageFiles Include="WebAudio.fsi;WebAudio.fs" Pack="true" PackagePath="fable/%(Filename)%(Extension)" BuildAction="None" />
+      <_PackageFiles Include="Fable/FS.GG.Audio.WebBrowser.fsproj" Pack="true" PackagePath="fable/FS.GG.Audio.WebBrowser.fsproj" BuildAction="None" />
+    </ItemGroup>
+  </Target>
+  <ItemGroup>
+    <Compile Include="WebAudio.fsi" />
+    <Compile Include="WebAudio.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\FS.GG.Audio.Core\FS.GG.Audio.Core.fsproj" />
+    <PackageReference Include="Fable.Browser.Dom" />
+    <PackageReference Include="Fable.Package.SDK" PrivateAssets="all" IncludeAssets="runtime; build; native; contentfiles; analyzers; buildtransitive" />
+  </ItemGroup>
+</Project>
