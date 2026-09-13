@@ -24,7 +24,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version to pack+publish (e.g. 0.1.0-preview.1). Required to actually push on a manual run; omit for a pack-only dry run."
+        description: "Version without the v prefix (e.g. 0.1.0-preview.1). Required to publish or recover; omit for a pack-only dry run."
         type: string
         required: false
       source_run_id:
@@ -93,7 +93,10 @@ jobs:
           case "${{ github.event_name }}" in
             release)           raw="${{ github.event.release.tag_name }}" ;;
             push)              raw="${GITHUB_REF_NAME}" ;;
-            workflow_dispatch) raw="${{ inputs.version }}" ;;
+            workflow_dispatch)
+              requested="${{ inputs.version }}"
+              raw="${requested:+v${requested#v}}"
+              ;;
             *)                 raw="" ;;
           esac
           ver="${raw#v}"   # v0.1.0-preview.1 -> 0.1.0-preview.1
