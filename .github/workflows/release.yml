@@ -2,14 +2,14 @@ name: release
 
 # Release-only publish for FS.GG.Audio. Tag-triggered; NEVER a required check and NEVER on push/PR
 # (mirrors the sibling FS-GG repos' release cadence). Publishes the coherent set
-# FS.GG.Audio.Core + .Host + .Elmish + .Engine to the org GitHub Packages feed
+# FS.GG.Audio.Core + .Host + .Elmish + .Engine + .WebBrowser to the org GitHub Packages feed
 # (nuget.pkg.github.com/FS-GG), then dual-publishes the BYTE-IDENTICAL set to public nuget.org via
 # Trusted Publishing / OIDC (ADR-0012/0013 — no stored key). It ALSO attaches the "schema/apps"
 # artifacts to the GitHub Release: the committed .fsi API surface, the SDD lifecycle artifacts, and
 # the built sample app. Everything is gated on a green headless build+test first (publish-before-flip).
 #
-# All four packages share ONE version — <FsGgAudioVersion> in Directory.Packages.props (the
-# version-of-truth) — and move as a coherent set. Engine/Elmish/Host ProjectReferences to Core are
+# All five packages share ONE version — <FsGgAudioVersion> in Directory.Packages.props (the
+# version-of-truth) — and move as a coherent set. Engine/Elmish/Host/WebBrowser ProjectReferences to Core are
 # emitted as package dependencies at the same version.
 #
 # NOTE (manual, one-time): the nuget.org push needs an org Trusted Publishing policy registered for
@@ -131,7 +131,18 @@ jobs:
             exit 1
           fi
           dotnet pack FS.GG.Audio.slnx -c Release -p:Version="$VER" -o artifacts/packages
+          (cd artifacts/packages && sha256sum -- *.nupkg | sort -k2 > SHA256SUMS)
           echo "Packed:"; ls -1 artifacts/packages/*.nupkg
+
+      - name: Retain original coherent package bytes before publication
+        uses: actions/upload-artifact@v7
+        with:
+          name: audio-release-custody-${{ github.sha }}-${{ steps.ver.outputs.version }}
+          path: |
+            artifacts/packages/*.nupkg
+            artifacts/packages/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 90
 
       - name: Push coherent set to nuget.pkg.github.com/FS-GG
         if: steps.ver.outputs.push == 'true'
