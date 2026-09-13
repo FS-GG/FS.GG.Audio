@@ -121,7 +121,7 @@ dotnet test  FS.GG.Audio.slnx -c Debug
 `release.yml` is tag-triggered (`v*`): it verifies (locked restore + headless build/test), publishes
 the coherent package set to the org GitHub Packages feed and nuget.org (OIDC Trusted Publishing),
 and attaches the `.fsi` API surface, the SDD lifecycle artifacts, and the sample app to the GitHub
-Release. All four packages share one version (`<FsGgAudioVersion>` in `Directory.Packages.props`).
+Release. All five packages share one version (`<FsGgAudioVersion>` in `Directory.Packages.props`).
 
 ## License
 
