@@ -39,6 +39,10 @@ on:
         description: "Failed release-skills run that originally published the archive to the org feed."
         type: string
         required: false
+      skills_publish:
+        description: "Publish the recovered archive (false performs custody and two-feed readback only)."
+        type: boolean
+        default: true
 
 concurrency:
   group: release-${{ github.ref }}
@@ -148,11 +152,13 @@ jobs:
           if-no-files-found: error
           retention-days: 90
       - name: NuGet login
+        if: inputs.skills_publish
         id: login
         uses: NuGet/login@v1
         with:
           user: ${{ secrets.NUGET_USER || 'Paradigma11' }}
       - name: Push recovered original to nuget.org
+        if: inputs.skills_publish
         run: dotnet nuget push "${{ steps.archive.outputs.path }}" --source https://api.nuget.org/v3/index.json --api-key "${{ steps.login.outputs.NUGET_API_KEY }}"
       - name: Verify public payload against the recovered original
         shell: bash
@@ -162,9 +168,9 @@ jobs:
         run: |
           set -euo pipefail
           public="$RUNNER_TEMP/fs.gg.audio.skills.$VERSION.public.nupkg"
-          for i in $(seq 1 24); do
+          for i in $(seq 1 60); do
             curl -fsSL -o "$public" "https://api.nuget.org/v3-flatcontainer/fs.gg.audio.skills/$VERSION/fs.gg.audio.skills.$VERSION.nupkg" && break
-            sleep 5
+            sleep 10
           done
           test -s "$public"
           python3 - "$ORIGINAL" "$public" <<'PY'
