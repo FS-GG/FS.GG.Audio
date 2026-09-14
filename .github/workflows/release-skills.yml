@@ -55,10 +55,29 @@ jobs:
       - run: |
           dotnet restore tests/Skills.Package.Tests/Skills.Package.Tests.fsproj --locked-mode
           dotnet build tests/Skills.Package.Tests/Skills.Package.Tests.fsproj -c Release --no-restore
-      - run: dotnet pack src/FS.GG.Audio.Skills/FS.GG.Audio.Skills.csproj -c Release -o artifacts/packages --no-restore
+      - name: Pack once and record the original archive
+        id: archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          dotnet pack src/FS.GG.Audio.Skills/FS.GG.Audio.Skills.csproj -c Release -o artifacts/packages --no-restore
+          archive="$(find artifacts/packages -maxdepth 1 -type f -name 'FS.GG.Audio.Skills.*.nupkg' -print -quit)"
+          test -s "$archive"
+          sha256sum "$archive" | tee artifacts/packages/ORIGINAL_SHA256
+          echo "path=$archive" >> "$GITHUB_OUTPUT"
+      - name: Retain original archive before either push
+        if: steps.version.outputs.push == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: audio-skills-release-custody-${{ github.sha }}-${{ steps.version.outputs.version }}
+          path: |
+            ${{ steps.archive.outputs.path }}
+            artifacts/packages/ORIGINAL_SHA256
+          if-no-files-found: error
+          retention-days: 90
       - name: Push org package
         if: steps.version.outputs.push == 'true'
-        run: dotnet nuget push artifacts/packages/FS.GG.Audio.Skills.*.nupkg --source https://nuget.pkg.github.com/FS-GG/index.json --api-key "${{ secrets.GITHUB_TOKEN }}"
+        run: dotnet nuget push "${{ steps.archive.outputs.path }}" --source https://nuget.pkg.github.com/FS-GG/index.json --api-key "${{ secrets.GITHUB_TOKEN }}"
       - name: NuGet login
         if: steps.version.outputs.push == 'true'
         id: login
@@ -67,7 +86,7 @@ jobs:
           user: ${{ secrets.NUGET_USER || 'Paradigma11' }}
       - name: Push public package
         if: steps.version.outputs.push == 'true'
-        run: dotnet nuget push artifacts/packages/FS.GG.Audio.Skills.*.nupkg --source https://api.nuget.org/v3/index.json --api-key "${{ steps.login.outputs.NUGET_API_KEY }}"
+        run: dotnet nuget push "${{ steps.archive.outputs.path }}" --source https://api.nuget.org/v3/index.json --api-key "${{ steps.login.outputs.NUGET_API_KEY }}"
       - name: Read back public payload
         if: steps.version.outputs.push == 'true'
         env:

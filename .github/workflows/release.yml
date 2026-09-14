@@ -31,6 +31,14 @@ on:
         description: "Failed tag release run whose retained package artifact must be resumed."
         type: string
         required: false
+      skills_version:
+        description: "Recover this skills version from the org feed and publish the same archive publicly."
+        type: string
+        required: false
+      skills_source_run_id:
+        description: "Failed release-skills run that originally published the archive to the org feed."
+        type: string
+        required: false
 
 concurrency:
   group: release-${{ github.ref }}
@@ -40,10 +48,147 @@ permissions:
   contents: read
 
 jobs:
+  recover-skills:
+    name: Recover FS.GG.Audio.Skills from the org feed
+    runs-on: ubuntu-latest
+    if: github.repository == 'FS-GG/FS.GG.Audio' && github.event_name == 'workflow_dispatch' && inputs.skills_version != ''
+    permissions:
+      actions: read
+      contents: read
+      packages: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+      - name: Authenticate failed skills release
+        id: source
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SOURCE_RUN_ID: ${{ inputs.skills_source_run_id }}
+          VERSION: ${{ inputs.skills_version }}
+        run: |
+          set -euo pipefail
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+            echo "::error::skills_version must be a stable three-part version"
+            exit 1
+          }
+          [[ "$SOURCE_RUN_ID" =~ ^[0-9]+$ ]] || {
+            echo "::error::skills_source_run_id must be numeric"
+            exit 1
+          }
+          git fetch --force origin "refs/tags/skills/v$VERSION:refs/tags/skills/v$VERSION"
+          source_head="$(git rev-parse "refs/tags/skills/v$VERSION^{commit}")"
+          run_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID")"
+          jq -e --arg head "$source_head" --arg branch "skills/v$VERSION" \
+            '.event == "push" and .head_branch == $branch and .head_sha == $head and .status == "completed" and .conclusion == "failure" and .path == ".github/workflows/release-skills.yml"' \
+            <<<"$run_json" >/dev/null || {
+              echo "::error::run $SOURCE_RUN_ID is not the failed skills release for immutable tag skills/v$VERSION at $source_head"
+              exit 1
+            }
+          echo "source-head=$source_head" >> "$GITHUB_OUTPUT"
+      - name: Recover and verify the exact org-feed archive
+        id: archive
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ inputs.skills_version }}
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/audio-skills-recovery"
+          packages="$work/packages"
+          mkdir -p "$work" "$packages"
+          dotnet nuget add source https://nuget.pkg.github.com/FS-GG/index.json \
+            --name org --username FS-GG --password "$GH_TOKEN" --store-password-in-clear-text \
+            --configfile "$work/NuGet.Config"
+          cat > "$work/recovery.csproj" <<EOF
+          <Project Sdk="Microsoft.NET.Sdk">
+            <PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup>
+            <ItemGroup><PackageReference Include="FS.GG.Audio.Skills" Version="[$VERSION]" /></ItemGroup>
+          </Project>
+          EOF
+          dotnet restore "$work/recovery.csproj" --packages "$packages" \
+            --configfile "$work/NuGet.Config" --no-http-cache
+          archive="$packages/fs.gg.audio.skills/$VERSION/fs.gg.audio.skills.$VERSION.nupkg"
+          recorded_sha512="$packages/fs.gg.audio.skills/$VERSION/fs.gg.audio.skills.$VERSION.nupkg.sha512"
+          test -s "$archive"
+          test -s "$recorded_sha512"
+          actual_sha512="$(openssl dgst -sha512 -binary "$archive" | base64 -w0)"
+          expected_sha512="$(tr -d '\r\n' < "$recorded_sha512")"
+          [[ "$actual_sha512" == "$expected_sha512" ]] || {
+            echo "::error::recovered archive does not match the org feed's recorded package hash"
+            exit 1
+          }
+          python3 - "$archive" <<'PY'
+          import json, sys, zipfile
+          with zipfile.ZipFile(sys.argv[1]) as package:
+              manifest = json.loads(package.read("audio-skills/skill-manifest.json"))
+              assert manifest["schemaVersion"] == 2
+              assert [skill["id"] for skill in manifest["skills"]] == ["fs-gg-browser-audio"]
+          PY
+          sha256sum "$archive" | tee "$work/ORIGINAL_SHA256"
+          cp "$recorded_sha512" "$work/ORIGINAL_SHA512"
+          echo "path=$archive" >> "$GITHUB_OUTPUT"
+          echo "work=$work" >> "$GITHUB_OUTPUT"
+      - name: Retain recovered original before public publication
+        id: custody
+        uses: actions/upload-artifact@v7
+        with:
+          name: audio-skills-release-custody-${{ steps.source.outputs.source-head }}-${{ inputs.skills_version }}
+          path: |
+            ${{ steps.archive.outputs.path }}
+            ${{ steps.archive.outputs.work }}/ORIGINAL_SHA256
+            ${{ steps.archive.outputs.work }}/ORIGINAL_SHA512
+          if-no-files-found: error
+          retention-days: 90
+      - name: NuGet login
+        id: login
+        uses: NuGet/login@v1
+        with:
+          user: ${{ secrets.NUGET_USER || 'Paradigma11' }}
+      - name: Push recovered original to nuget.org
+        run: dotnet nuget push "${{ steps.archive.outputs.path }}" --source https://api.nuget.org/v3/index.json --api-key "${{ steps.login.outputs.NUGET_API_KEY }}"
+      - name: Verify public payload against the recovered original
+        shell: bash
+        env:
+          ORIGINAL: ${{ steps.archive.outputs.path }}
+          VERSION: ${{ inputs.skills_version }}
+        run: |
+          set -euo pipefail
+          public="$RUNNER_TEMP/fs.gg.audio.skills.$VERSION.public.nupkg"
+          for i in $(seq 1 24); do
+            curl -fsSL -o "$public" "https://api.nuget.org/v3-flatcontainer/fs.gg.audio.skills/$VERSION/fs.gg.audio.skills.$VERSION.nupkg" && break
+            sleep 5
+          done
+          test -s "$public"
+          python3 - "$ORIGINAL" "$public" <<'PY'
+          import hashlib, json, sys, zipfile
+
+          def payload(path):
+              with zipfile.ZipFile(path) as package:
+                  entries = []
+                  for name in sorted(package.namelist()):
+                      lowered = name.lower()
+                      if name.endswith("/") or name.endswith(".signature.p7s") or "/package/services/metadata/core-properties/" in lowered:
+                          continue
+                      entries.append(name.encode() + b"\0" + hashlib.sha256(package.read(name)).digest())
+                  return hashlib.sha256(b"".join(entries)).hexdigest()
+
+          original, public = map(payload, sys.argv[1:])
+          assert original == public, (original, public)
+          print(f"original-payload-sha256={original}")
+          print(f"public-payload-sha256={public}")
+          PY
+          sha256sum "$public"
+          echo "custody-artifact-id=${{ steps.custody.outputs.artifact-id }}"
+          echo "custody-artifact-digest=${{ steps.custody.outputs.artifact-digest }}"
+
   verify:
     name: Verify (locked restore + headless build + test)
     runs-on: ubuntu-latest
-    if: github.repository == 'FS-GG/FS.GG.Audio'
+    if: github.repository == 'FS-GG/FS.GG.Audio' && (github.event_name != 'workflow_dispatch' || inputs.skills_version == '')
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
@@ -70,7 +215,7 @@ jobs:
   publish:
     name: Publish packages (org feed + nuget.org) + schema/apps assets
     runs-on: ubuntu-latest
-    if: github.repository == 'FS-GG/FS.GG.Audio'
+    if: github.repository == 'FS-GG/FS.GG.Audio' && (github.event_name != 'workflow_dispatch' || inputs.skills_version == '')
     needs: [verify]
     permissions:
       actions: read      # authenticate and download a failed run's retained release bytes
