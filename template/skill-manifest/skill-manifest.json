@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 2,
+  "skills": [
+    {
+      "id": "fs-gg-browser-audio",
+      "scope": "product",
+      "sha256": "07d9a0277044162611cffb20089577565fcc0ef802ac71f0cbc668cf70c0818c",
+      "resolvablePath": ".agents/skills/fs-gg-browser-audio/SKILL.md",
+      "materializes-when": "template == fable-game",
+      "supplied-by": "template/product-skills/fs-gg-browser-audio/",
+      "files": [
+        {
+          "path": "SKILL.md",
+          "sha256": "07d9a0277044162611cffb20089577565fcc0ef802ac71f0cbc668cf70c0818c"
+        }
+      ]
+    }
+  ]
+}

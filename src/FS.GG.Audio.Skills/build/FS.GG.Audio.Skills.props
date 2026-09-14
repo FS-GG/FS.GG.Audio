@@ -1,0 +1,6 @@
+<Project>
+  <PropertyGroup>
+    <FsggAudioSkillsContentDir Condition="'$(FsggAudioSkillsContentDir)' == ''">$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)../audio-skills'))</FsggAudioSkillsContentDir>
+  </PropertyGroup>
+</Project>
+
