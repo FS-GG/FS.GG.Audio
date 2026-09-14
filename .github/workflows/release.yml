@@ -100,6 +100,10 @@ jobs:
           work="$RUNNER_TEMP/audio-skills-recovery"
           packages="$work/packages"
           mkdir -p "$work" "$packages"
+          cat > "$work/NuGet.Config" <<'CONFIG'
+          <?xml version="1.0" encoding="utf-8"?>
+          <configuration><packageSources><clear /></packageSources></configuration>
+          CONFIG
           dotnet nuget add source https://nuget.pkg.github.com/FS-GG/index.json \
             --name org --username FS-GG --password "$GH_TOKEN" --store-password-in-clear-text \
             --configfile "$work/NuGet.Config"
