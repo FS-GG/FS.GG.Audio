@@ -1,0 +1,10 @@
+<Project>
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageVersion Include="FSharp.Core" Version="10.1.301" />
+    <PackageVersion Include="FS.GG.Audio.Core" Version="0.6.0" />
+    <PackageVersion Include="FS.GG.Audio.WebBrowser" Version="0.6.0" />
+  </ItemGroup>
+</Project>

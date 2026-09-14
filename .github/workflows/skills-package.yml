@@ -1,0 +1,37 @@
+name: skills-package
+
+on:
+  pull_request:
+    paths:
+      - "template/product-skills/**"
+      - "template/skill-manifest/**"
+      - "scripts/generate-skill-manifest.py"
+      - "src/FS.GG.Audio.Skills/**"
+      - ".github/workflows/skills-package.yml"
+      - ".github/workflows/release-skills.yml"
+  push:
+    branches: [main]
+    paths:
+      - "template/product-skills/**"
+      - "template/skill-manifest/**"
+      - "scripts/generate-skill-manifest.py"
+      - "src/FS.GG.Audio.Skills/**"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify FS.GG.Audio.Skills
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+      - run: dotnet restore src/FS.GG.Audio.Skills/FS.GG.Audio.Skills.csproj --locked-mode
+      - run: bash src/FS.GG.Audio.Skills/verify-package.sh
+      - name: Compile published browser-audio example
+        run: |
+          dotnet restore tests/Skills.Package.Tests/Skills.Package.Tests.fsproj --locked-mode
+          dotnet build tests/Skills.Package.Tests/Skills.Package.Tests.fsproj -c Release --no-restore

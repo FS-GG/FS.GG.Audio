@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <GenerateDependencyFile>false</GenerateDependencyFile>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <EnablePackageValidation>false</EnablePackageValidation>
+    <IncludeSymbols>false</IncludeSymbols>
+    <IsPackable>true</IsPackable>
+    <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
+    <PackageId>FS.GG.Audio.Skills</PackageId>
+    <Version>0.1.0</Version>
+    <Description>FS.GG.Audio owner-authored browser product guidance with a closed, content-addressed manifest.</Description>
+    <PackageTags>fsgg;audio;browser;skills;product;scaffold</PackageTags>
+    <PackageProjectUrl>https://github.com/FS-GG/FS.GG.Audio/tree/main/src/FS.GG.Audio.Skills</PackageProjectUrl>
+    <NoWarn>$(NoWarn);NU5128</NoWarn>
+    <SkillsStagingDir>$(BaseIntermediateOutputPath)skills-staging</SkillsStagingDir>
+    <TargetsForTfmSpecificContentInPackage>$(TargetsForTfmSpecificContentInPackage);AddSkillsContent</TargetsForTfmSpecificContentInPackage>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="build/FS.GG.Audio.Skills.props" Pack="true" PackagePath="build/" />
+  </ItemGroup>
+  <Target Name="StageSkills" BeforeTargets="Pack">
+    <Exec Command="python3 &quot;$(MSBuildProjectDirectory)/stage-skills.py&quot; &quot;$(SkillsStagingDir)&quot;" />
+  </Target>
+  <Target Name="AddSkillsContent" DependsOnTargets="StageSkills">
+    <ItemGroup>
+      <_SkillsStaged Include="$(SkillsStagingDir)/**/*" />
+      <TfmSpecificPackageFile Include="@(_SkillsStaged)">
+        <PackagePath>audio-skills/</PackagePath>
+      </TfmSpecificPackageFile>
+    </ItemGroup>
+  </Target>
+</Project>

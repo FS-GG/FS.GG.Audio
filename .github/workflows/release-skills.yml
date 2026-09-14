@@ -1,0 +1,93 @@
+name: release-skills
+
+on:
+  push:
+    tags: ["skills/v*"]
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the verified archive
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-skills-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish FS.GG.Audio.Skills
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+      - name: Bind tag and version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(dotnet msbuild src/FS.GG.Audio.Skills/FS.GG.Audio.Skills.csproj -getProperty:Version | tr -d '[:space:]')"
+          if [[ "$version" == *-* ]]; then
+            echo "::error::skills releases must be stable"
+            exit 1
+          fi
+          if [[ "${{ github.event_name }}" == "push" && "${GITHUB_REF_NAME#skills/v}" != "$version" ]]; then
+            echo "::error::tag does not match project version $version"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [[ "${{ github.event_name }}" == "push" || "${{ inputs.publish }}" == "true" ]]; then
+            echo "push=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "push=false" >> "$GITHUB_OUTPUT"
+          fi
+      - run: dotnet restore src/FS.GG.Audio.Skills/FS.GG.Audio.Skills.csproj --locked-mode
+      - run: bash src/FS.GG.Audio.Skills/verify-package.sh
+      - run: |
+          dotnet restore tests/Skills.Package.Tests/Skills.Package.Tests.fsproj --locked-mode
+          dotnet build tests/Skills.Package.Tests/Skills.Package.Tests.fsproj -c Release --no-restore
+      - run: dotnet pack src/FS.GG.Audio.Skills/FS.GG.Audio.Skills.csproj -c Release -o artifacts/packages --no-restore
+      - name: Push org package
+        if: steps.version.outputs.push == 'true'
+        run: dotnet nuget push artifacts/packages/FS.GG.Audio.Skills.*.nupkg --source https://nuget.pkg.github.com/FS-GG/index.json --api-key "${{ secrets.GITHUB_TOKEN }}"
+      - name: NuGet login
+        if: steps.version.outputs.push == 'true'
+        id: login
+        uses: NuGet/login@v1
+        with:
+          user: ${{ secrets.NUGET_USER || 'Paradigma11' }}
+      - name: Push public package
+        if: steps.version.outputs.push == 'true'
+        run: dotnet nuget push artifacts/packages/FS.GG.Audio.Skills.*.nupkg --source https://api.nuget.org/v3/index.json --api-key "${{ steps.login.outputs.NUGET_API_KEY }}"
+      - name: Read back public payload
+        if: steps.version.outputs.push == 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          work="$(mktemp -d)"
+          for i in $(seq 1 12); do
+            curl -fsSL -o "$work/public.nupkg" "https://api.nuget.org/v3-flatcontainer/fs.gg.audio.skills/$VERSION/fs.gg.audio.skills.$VERSION.nupkg" && break
+            sleep 5
+          done
+          test -s "$work/public.nupkg"
+          python3 - "$work/public.nupkg" <<'PY'
+          import hashlib, json, sys, zipfile
+          with zipfile.ZipFile(sys.argv[1]) as z:
+              manifest = json.loads(z.read("audio-skills/skill-manifest.json"))
+              assert manifest["schemaVersion"] == 2
+              assert [s["id"] for s in manifest["skills"]] == ["fs-gg-browser-audio"]
+              payload = []
+              for name in sorted(n for n in z.namelist() if not n.endswith("/") and not n.endswith(".signature.p7s") and "/package/services/metadata/core-properties/" not in n.lower()):
+                  payload.append(name.encode() + b"\0" + hashlib.sha256(z.read(name)).digest())
+              print("public-payload-sha256=" + hashlib.sha256(b"".join(payload)).hexdigest())
+          PY
