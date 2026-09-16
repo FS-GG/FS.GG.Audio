@@ -5,14 +5,20 @@ open FS.GG.Audio.Core
 
 /// Browser audio lifecycle. Construction remains locked and silent until a gesture unlock succeeds.
 [<RequireQualifiedAccess>]
-type WebAudioStatus = Locked | Running | Paused | Disposed
+type WebAudioStatus =
+    | Locked
+    | Running
+    | Paused
+    | Disposed
 
 /// Decode state for a product-owned sound or track asset.
 [<RequireQualifiedAccess>]
-type WebAudioAssetStatus = Pending | Ready | Failed of string
+type WebAudioAssetStatus =
+    | Pending
+    | Ready
+    | Failed of string
 
-type WebAudioConfig =
-    { MaxOneShotVoices: int }
+type WebAudioConfig = { MaxOneShotVoices: int }
 
 [<RequireQualifiedAccess>]
 type WebAudioRefusal =
@@ -63,7 +69,13 @@ module WebAudioPolicy =
     val soundKey: SoundId -> string
     val trackKey: TrackId -> string
     val initialize: config: WebAudioConfig -> WebAudioPolicyState
-    val update: config: WebAudioConfig -> observation: WebAudioObservation -> state: WebAudioPolicyState -> WebAudioPolicyState * WebAudioPolicyEffect list
+
+    val update:
+        config: WebAudioConfig ->
+        observation: WebAudioObservation ->
+        state: WebAudioPolicyState ->
+            WebAudioPolicyState * WebAudioPolicyEffect list
+
     /// Status, asset count, ready count, active voice count, music presence and next voice id.
     val observe: state: WebAudioPolicyState -> WebAudioStatus * int * int * int * bool * uint64
 
@@ -76,18 +88,20 @@ type WebAudioHostEvent =
     | Disposed
 
 type WebAudioHostObservation =
-    { Status: WebAudioStatus
-      AssetCount: int
-      ReadyAssetCount: int
-      ActiveVoiceCount: int
-      HasMusic: bool
-      ContextCreated: bool
-      ContextState: string
-      GraphVoiceCount: int
-      GraphHasMusic: bool
-      MasterGain: float
-      LastPan: float
-      IsDisposed: bool }
+    {
+        Status: WebAudioStatus
+        AssetCount: int
+        ReadyAssetCount: int
+        ActiveVoiceCount: int
+        HasMusic: bool
+        ContextCreated: bool
+        ContextState: string
+        GraphVoiceCount: int
+        GraphHasMusic: bool
+        MasterGain: float
+        LastPan: float
+        IsDisposed: bool
+    }
 
 /// Gesture-gated, disposable Web Audio graph for the existing `AudioEffect` vocabulary.
 [<Sealed>]

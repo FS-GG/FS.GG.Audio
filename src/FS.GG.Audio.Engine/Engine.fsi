@@ -10,35 +10,39 @@ open FS.GG.Audio.Host
 /// source and is a pure direction — so tuning the distance model cannot silently re-tune the
 /// panning. (It once could: `RefDistance` doubled as the pan width.)
 type SpatialConfig =
-    { /// Distance at which a voice plays unattenuated; attenuation begins beyond it.
-      RefDistance: float
-      /// How sharply gain falls off past `RefDistance`, in the inverse-distance model
-      /// `ref / (ref + rolloff * (d - ref))`. `0` disables attenuation.
-      Rolloff: float
-      /// Distance past which a voice attenuates no further. `None` leaves it uncapped. It caps how
-      /// far away a source SOUNDS, never the direction it comes from.
-      MaxDistance: float option }
+    {
+        /// Distance at which a voice plays unattenuated; attenuation begins beyond it.
+        RefDistance: float
+        /// How sharply gain falls off past `RefDistance`, in the inverse-distance model
+        /// `ref / (ref + rolloff * (d - ref))`. `0` disables attenuation.
+        Rolloff: float
+        /// Distance past which a voice attenuates no further. `None` leaves it uncapped. It caps how
+        /// far away a source SOUNDS, never the direction it comes from.
+        MaxDistance: float option
+    }
 
 /// Public contract type. A one-shot voice realized on a `step`, exposed for headless assertions.
 /// `EffectiveGain` = request-gain × bus gain × Master gain × distance attenuation, clamped to
 /// `[0,1]`. `Positional` is false when 3D was unavailable (the backend is not an `IMixingBackend`)
 /// and the voice degraded to a non-positional one at the bus-scaled gain.
 type Voice =
-    { Sound: SoundId
-      Bus: Bus
-      RequestGain: float
-      EffectiveGain: float
-      /// Stereo pan in `[-1, 1]`: `-1` hard left, `0` centred, `+1` hard right. Total — a
-      /// non-finite emitter position gives `0.0` (centred), never `nan`.
-      ///
-      /// The SINE OF THE AZIMUTH to the source, so it is a pure direction and does not vary with
-      /// distance: a source far away but nearly straight ahead is near-centred, and only one beside
-      /// the listener is hard-panned. Front and back are not distinguishable in a scalar pan (45°
-      /// behind-right and 45° ahead-right both give `+0.707`); elevation is out by DEC-001.
-      ///
-      /// `0.0` whenever `Positional` is false — a degraded voice has no direction to carry.
-      Pan: float
-      Positional: bool }
+    {
+        Sound: SoundId
+        Bus: Bus
+        RequestGain: float
+        EffectiveGain: float
+        /// Stereo pan in `[-1, 1]`: `-1` hard left, `0` centred, `+1` hard right. Total — a
+        /// non-finite emitter position gives `0.0` (centred), never `nan`.
+        ///
+        /// The SINE OF THE AZIMUTH to the source, so it is a pure direction and does not vary with
+        /// distance: a source far away but nearly straight ahead is near-centred, and only one beside
+        /// the listener is hard-panned. Front and back are not distinguishable in a scalar pan (45°
+        /// behind-right and 45° ahead-right both give `+0.707`); elevation is out by DEC-001.
+        ///
+        /// `0.0` whenever `Positional` is false — a degraded voice has no direction to carry.
+        Pan: float
+        Positional: bool
+    }
 
 /// Public contract type. The mixing/voice engine: named buses with independent gain, active
 /// fade/duck envelopes, the listener, and the single music voice. A pure, deterministic state
@@ -97,8 +101,7 @@ module Engine =
     /// And a test wants to ASSERT the fault leg: the latch is device-free, so driving a throwing
     /// backend through `step` and reading the emitted lines exercises the production failure path
     /// headless — which is the only way this leg is covered by anything at all.
-    val createWithDiagnostics:
-        device: DeviceDiagnostics.T -> config: SpatialConfig -> backend: IAudioBackend -> T
+    val createWithDiagnostics: device: DeviceDiagnostics.T -> config: SpatialConfig -> backend: IAudioBackend -> T
 
     /// Advance the engine by `dt` seconds and apply a per-frame batch of effects, in order:
     /// completes elapsed fade/duck envelopes, applies the batch (bus/master sets, ducks, one-shot

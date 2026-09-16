@@ -37,9 +37,12 @@ module Audio =
     // Total clamp into [minVolume, maxVolume]. `nan` fails both comparisons, so it falls through to
     // minVolume — a defined, non-throwing floor (Principle VI: safe failure, no surprise on bad input).
     let clampVolume (level: float) : float =
-        if level <= minVolume || System.Double.IsNaN level then minVolume
-        elif level >= maxVolume then maxVolume
-        else level
+        if level <= minVolume || System.Double.IsNaN level then
+            minVolume
+        elif level >= maxVolume then
+            maxVolume
+        else
+            level
 
     let playSfx (sound: SoundId) (volume: float) : AudioEffect = PlaySfx(sound, clampVolume volume)
 
@@ -84,7 +87,11 @@ module Audio =
     // It now accumulates in a ResizeArray and calls `interpret` per effect for the normalization.
     // Anything that records for longer than a frame should do the same rather than fold this.
     let record (effect: AudioEffect) (evidence: AudioEvidence) : AudioEvidence =
-        { evidence with Requested = evidence.Requested @ [ normalize effect ] }
+        { evidence with
+            Requested = evidence.Requested @ [ normalize effect ]
+        }
 
     let interpret (effects: AudioEffect list) : AudioEvidence =
-        { Requested = List.map normalize effects }
+        {
+            Requested = List.map normalize effects
+        }
