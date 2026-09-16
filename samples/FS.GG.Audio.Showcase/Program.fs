@@ -46,9 +46,11 @@ let private wav (seconds: float) (sample: float -> float) : byte[] =
     w.Write(16s)
     w.Write(Text.Encoding.ASCII.GetBytes "data")
     w.Write(bytes)
+
     for i in 0 .. frames - 1 do
         let v = sample (float i / float rate)
         w.Write(int16 (32000.0 * (max -1.0 (min 1.0 v))))
+
     w.Flush()
     ms.ToArray()
 
@@ -71,26 +73,30 @@ let private floatWav () =
 
 let private sounds =
     dict
-        [ "blip", ping 880.0 0.25 9.0
-          "thud", ping 110.0 0.40 5.0
-          "chime", ping 1320.0 0.35 7.0
-          "bad-codec", floatWav ()
-          // Not a RIFF file at all — the third distinct failure, and the third distinct fix.
-          "not-a-wav", Text.Encoding.ASCII.GetBytes "these bytes were never a wav file, not even close" ]
+        [
+            "blip", ping 880.0 0.25 9.0
+            "thud", ping 110.0 0.40 5.0
+            "chime", ping 1320.0 0.35 7.0
+            "bad-codec", floatWav ()
+            // Not a RIFF file at all — the third distinct failure, and the third distinct fix.
+            "not-a-wav", Text.Encoding.ASCII.GetBytes "these bytes were never a wav file, not even close"
+        ]
 
 let private tracks = dict [ "calm", loop 220.0 2.0; "tense", loop 277.0 2.0 ]
 
 let private resolver: AssetResolver =
-    { ResolveSound =
-        fun (SoundId id) ->
-            match sounds.TryGetValue id with
-            | true, b -> Some b
-            | _ -> None // "ghost" resolves to nothing — that is the point, see §8
-      ResolveTrack =
-        fun (TrackId id) ->
-            match tracks.TryGetValue id with
-            | true, b -> Some b
-            | _ -> None }
+    {
+        ResolveSound =
+            fun (SoundId id) ->
+                match sounds.TryGetValue id with
+                | true, b -> Some b
+                | _ -> None // "ghost" resolves to nothing — that is the point, see §8
+        ResolveTrack =
+            fun (TrackId id) ->
+                match tracks.TryGetValue id with
+                | true, b -> Some b
+                | _ -> None
+    }
 
 // ── narration ─────────────────────────────────────────────────────────────────────────────────
 
@@ -115,18 +121,30 @@ let main argv =
 
     printfn ""
     printfn "  FS.GG.Audio — showcase"
-    printfn "  %s" (if fast then "--fast: no sleeping; the transcript is unchanged." else "real time — turn it up.")
+
+    printfn
+        "  %s"
+        (if fast then
+             "--fast: no sleeping; the transcript is unchanged."
+         else
+             "real time — turn it up.")
 
     // ── 1. the pure vocabulary ────────────────────────────────────────────────────────────────
     section 1 "Core — a pure request vocabulary. A product's `update` emits values, never sound."
+
     let batch =
-        [ CoreAudio.playSfx (SoundId "blip") 5.0 // out of range on purpose
-          CoreAudio.playMusic (TrackId "calm") true
-          CoreAudio.setBusVolume Sfx -2.0 // ditto
-          CoreAudio.duck Music 0.6 250.0 ]
+        [
+            CoreAudio.playSfx (SoundId "blip") 5.0 // out of range on purpose
+            CoreAudio.playMusic (TrackId "calm") true
+            CoreAudio.setBusVolume Sfx -2.0 // ditto
+            CoreAudio.duck Music 0.6 250.0
+        ]
+
     say "A batch built with deliberately out-of-range volumes (5.0 and -2.0):"
+
     for e in (CoreAudio.interpret batch).Requested do
         say (sprintf "  %A" e)
+
     say ""
     say "Clamped into [0,1] on the way in — `interpret` is the record-only interpreter, and the"
     say "recorded evidence IS the proof for a headless test. No device involved."
@@ -134,25 +152,37 @@ let main argv =
     // ── 2. the backend seam ───────────────────────────────────────────────────────────────────
     section 2 "Host — which backend did we actually get? (#34)"
     let backend = OpenAlBackend.create resolver
+
     match Backend.kindOf backend with
-    | BackendKind.DeviceBacked ->
-        say "DeviceBacked — a real OpenAL device opened. You should HEAR the rest of this."
+    | BackendKind.DeviceBacked -> say "DeviceBacked — a real OpenAL device opened. You should HEAR the rest of this."
     | BackendKind.RecordOnly(Silence.DeviceUnavailable reason) ->
         say (sprintf "RecordOnly — no device opened, so `create` substituted the Null backend:")
         say (sprintf "  \"%s\"" (reason.Trim()))
         say "That is the deliberate degrade (FR-004): the game runs, silently, and says so."
     | BackendKind.RecordOnly Silence.Requested -> say "RecordOnly — record-only was asked for."
     | BackendKind.Unknown -> say "Unknown — a backend this library did not build."
+
     say ""
-    say (sprintf "Backend.isDeviceBacked = %b — the predicate a CI suite branches on to skip loudly" (Backend.isDeviceBacked backend))
+
+    say (
+        sprintf
+            "Backend.isDeviceBacked = %b — the predicate a CI suite branches on to skip loudly"
+            (Backend.isDeviceBacked backend)
+    )
+
     say "rather than assert against a tape recorder."
 
     let engine = Engine.create backend
+
     let hold seconds =
         for _ in 1 .. int (seconds * 60.0) do
             Engine.step engine dt []
-            if not fast then Thread.Sleep 16
+
+            if not fast then
+                Thread.Sleep 16
+
     let fire effects = Engine.step engine dt effects
+
     let gains () =
         bar "Master" (engine.BusGain Master)
         bar "Music" (engine.BusGain Music)
@@ -169,6 +199,7 @@ let main argv =
     section 4 "Engine — a timed linear fade (`Engine.fadeBus`)"
     say "Fading Music 0 → 1 over 2s. Envelopes advance only as the engine is stepped."
     Engine.fadeBus engine Music 1.0 2.0
+
     for _ in 1..4 do
         hold 0.5
         gains ()
@@ -176,17 +207,23 @@ let main argv =
     // ── 5. one-shots and the voice pool ───────────────────────────────────────────────────────
     section 5 "Engine — one-shots on the Sfx bus, mixed under Master"
     say "Three pings, each scaled by Sfx × Master before it reaches the device:"
+
     for id in [ "blip"; "chime"; "thud" ] do
         fire [ CoreAudio.playSfx (SoundId id) 0.9 ]
+
         for v in engine.LastVoices do
             say (sprintf "  %-6s request=%.2f → effective=%.2f  (bus %A)" id v.RequestGain v.EffectiveGain v.Bus)
+
         hold 0.45
+
     say ""
     say "Sfx down to 0.25 — the SAME request now realizes quieter:"
     fire [ CoreAudio.setBusVolume Sfx 0.25 ]
     fire [ CoreAudio.playSfx (SoundId "blip") 0.9 ]
+
     for v in engine.LastVoices do
         say (sprintf "  blip   request=%.2f → effective=%.2f" v.RequestGain v.EffectiveGain)
+
     hold 0.5
     fire [ CoreAudio.setBusVolume Sfx 1.0 ]
 
@@ -194,9 +231,11 @@ let main argv =
     section 6 "Engine — side-chain ducking: pull the music down under a stinger"
     say "Duck Music by 0.7 over 1.2s, and fire a thud into the hole it makes."
     fire [ CoreAudio.duck Music 0.7 1200.0; CoreAudio.playSfx (SoundId "thud") 1.0 ]
+
     for _ in 1..4 do
         hold 0.3
         bar "Music" (engine.BusGain Music)
+
     say "Auto-restoring: the dip is a triangle, so it recovers without anyone cancelling it."
 
     // ── 7. 3D ─────────────────────────────────────────────────────────────────────────────────
@@ -204,19 +243,32 @@ let main argv =
     Engine.setListener engine 0.0 0.0 0.0
     say "A chime swept around the listener at a fixed 5m. Pan is the sine of the azimuth,"
     say "so it is a pure direction — it does not vary with distance:"
+
     for deg in [ -90; -45; 0; 45; 90 ] do
         let a = float deg * Math.PI / 180.0
         fire [ CoreAudio.playSfx3D (SoundId "chime") (5.0 * sin a) 0.0 (-5.0 * cos a) 1.0 ]
+
         for v in engine.LastVoices do
-            let ear = if v.Pan < -0.05 then "left" elif v.Pan > 0.05 then "right" else "ahead"
-            say (sprintf "  %+4d°  pan=%+.2f (%-5s)  gain=%.2f  positional=%b" deg v.Pan ear v.EffectiveGain v.Positional)
+            let ear =
+                if v.Pan < -0.05 then "left"
+                elif v.Pan > 0.05 then "right"
+                else "ahead"
+
+            say (
+                sprintf "  %+4d°  pan=%+.2f (%-5s)  gain=%.2f  positional=%b" deg v.Pan ear v.EffectiveGain v.Positional
+            )
+
         hold 0.4
+
     say ""
     say "Now the same bearing (45° right) at increasing distance — pan is unchanged, gain falls:"
+
     for d in [ 1.0; 3.0; 9.0 ] do
         fire [ CoreAudio.playSfx3D (SoundId "chime") (d * 0.707) 0.0 (-d * 0.707) 1.0 ]
+
         for v in engine.LastVoices do
             say (sprintf "  %4.0fm  pan=%+.2f  gain=%.2f" d v.Pan v.EffectiveGain)
+
         hold 0.4
 
     // ── 8. cross-fade ─────────────────────────────────────────────────────────────────────────
@@ -224,6 +276,7 @@ let main argv =
     say "Ambient takes over from Music over 2s at constant summed power."
     fire [ CoreAudio.setBusVolume Ambient 0.0 ]
     Engine.crossFade engine Music Ambient 2.0
+
     for _ in 1..4 do
         hold 0.5
         bar "Music" (engine.BusGain Music)
@@ -245,8 +298,10 @@ let main argv =
     Console.Error.Flush()
     say ""
     say "Now play all three again — and watch nothing appear:"
+
     for id in [ "ghost"; "bad-codec"; "not-a-wav" ] do
         fire [ CoreAudio.playSfx (SoundId id) 1.0 ]
+
     Console.Error.Flush()
     say "Reported once per id, and that is load-bearing rather than polite: a failed resolve is"
     say "deliberately NOT cached, so this leg is re-entered on EVERY play of a cue the product"
@@ -266,14 +321,19 @@ let main argv =
     section 11 "Elmish — the same effects as a `Cmd`, for a product with an `update`"
     say "`Audio.Cmd.ofEngine engine dt effects` routes a batch through the mixer; `ofEffects` is the"
     say "raw path above. A Cmd is a description — nothing plays until the runtime executes it."
+
     let cmd: Elmish.Cmd<unit> =
         ElmishAudio.Cmd.ofEngine engine dt [ CoreAudio.playSfx (SoundId "chime") 0.8 ]
+
     say ""
     say (sprintf "  built a Cmd carrying %d effect(s); executing it now:" (List.length cmd))
+
     for sub in cmd do
         sub ignore
+
     for v in engine.LastVoices do
         say (sprintf "  chime  effective=%.2f — realized through the engine, so the mix applied" v.EffectiveGain)
+
     hold 0.5
 
     // ── 12. sinks ─────────────────────────────────────────────────────────────────────────────
@@ -282,8 +342,10 @@ let main argv =
     say "Build it ONCE: rebuilt per frame it would carry a fresh engine and no envelope would advance."
     let sink = Engine.createSinkWith (fun () -> dt) engine
     sink [ CoreAudio.playSfx (SoundId "blip") 0.7 ]
+
     for v in engine.LastVoices do
         say (sprintf "  blip   effective=%.2f — same mix, through the sink" v.EffectiveGain)
+
     hold 0.4
 
     // ── 13. device health ─────────────────────────────────────────────────────────────────────
@@ -302,11 +364,14 @@ let main argv =
     printfn ""
     rule ()
     printfn " Same input, same transcript, every run — the mixer is advanced by a fixed dt."
-    printfn " %s"
+
+    printfn
+        " %s"
         (if Backend.isDeviceBacked backend then
              "A real device played this."
          else
              "No device here: the narration was the whole show, and that is FR-004 working.")
+
     rule ()
     printfn ""
     0

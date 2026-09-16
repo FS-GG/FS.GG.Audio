@@ -6,8 +6,10 @@ open System
 open FS.GG.Audio.Core
 
 type AssetResolver =
-    { ResolveSound: SoundId -> byte[] option
-      ResolveTrack: TrackId -> byte[] option }
+    {
+        ResolveSound: SoundId -> byte[] option
+        ResolveTrack: TrackId -> byte[] option
+    }
 
 type IAudioBackend =
     inherit IDisposable
@@ -76,11 +78,13 @@ module Wav =
     let private FormatExtensibleSize = 40
 
     type PcmData =
-        { FormatTag: int
-          Channels: int
-          BitsPerSample: int
-          SampleRate: int
-          Data: byte[] }
+        {
+            FormatTag: int
+            Channels: int
+            BitsPerSample: int
+            SampleRate: int
+            Data: byte[]
+        }
 
     // Minimal RIFF/WAVE PCM reader: walk chunks, pull fmt (codec/channels/rate/bits) + data. Total —
     // returns None on anything malformed or unrecognized rather than throwing.
@@ -90,7 +94,9 @@ module Wav =
     // `bufferFormat` at upload — and `FormatTag` follows it rather than inventing a second rule.
     let tryParse (bytes: byte[]) : PcmData option =
         try
-            let ascii off len = Text.Encoding.ASCII.GetString(bytes, off, len)
+            let ascii off len =
+                Text.Encoding.ASCII.GetString(bytes, off, len)
+
             if bytes.Length < 44 || ascii 0 4 <> "RIFF" || ascii 8 4 <> "WAVE" then
                 None
             else
@@ -110,10 +116,12 @@ module Wav =
                 // was false for two of the four billion sizes a file can name. A malformed chunk has
                 // to end the walk, never wedge the calling thread.
                 let mutable walking = true
+
                 while walking && pos + 8 <= bytes.Length do
                     let id = ascii pos 4
                     let sz = BitConverter.ToInt32(bytes, pos + 4)
                     let body = pos + 8
+
                     if sz < 0 then
                         // Stop, rather than return None outright: a bad size means we cannot trust
                         // anything BEYOND this chunk, not that what we already read is wrong. A file
@@ -151,12 +159,14 @@ module Wav =
                             // tag, and samples that happen to begin `01 00 00 00` would be read as
                             // "PCM" and uploaded as PCM: this bug's own fix handing the bug back.
                             formatTag <-
-                                if tag <> FormatExtensible then tag
+                                if tag <> FormatExtensible then
+                                    tag
                                 elif sz >= FormatExtensibleSize && body + 28 <= bytes.Length then
                                     BitConverter.ToInt32(bytes, body + 24)
                                 // No subformat to read, so the codec is genuinely unknown — and
                                 // assuming PCM is the assumption this whole change exists to remove.
-                                else FormatExtensible
+                                else
+                                    FormatExtensible
                         elif id = "data" then
                             dataOff <- body
                             dataLen <- sz
@@ -166,18 +176,28 @@ module Wav =
                         // making the parser total by accident of exception handling rather than by
                         // construction. Past the end simply ends the walk.
                         let next = int64 body + int64 sz + int64 (sz &&& 1)
-                        pos <- if next >= int64 bytes.Length then bytes.Length else int next
+
+                        pos <-
+                            if next >= int64 bytes.Length then
+                                bytes.Length
+                            else
+                                int next
+
                 if dataOff < 0 || channels = 0 || bits = 0 then
                     None
                 else
                     let len = max 0 (min dataLen (bytes.Length - dataOff))
+
                     Some
-                        { FormatTag = formatTag
-                          Channels = channels
-                          BitsPerSample = bits
-                          SampleRate = sampleRate
-                          Data = Array.sub bytes dataOff len }
-        with _ -> None
+                        {
+                            FormatTag = formatTag
+                            Channels = channels
+                            BitsPerSample = bits
+                            SampleRate = sampleRate
+                            Data = Array.sub bytes dataOff len
+                        }
+        with _ ->
+            None
 
 [<RequireQualifiedAccess>]
 module Spatial =
@@ -198,7 +218,7 @@ module Spatial =
         // p^2 <= 1 by the clamp above, so the sqrt is total and the result is always unit-length.
         // At a hard pan the depth is `-sqrt 0.0` = negative zero; fold it to +0.0 so a printed or
         // compared position reads as the plain 0.0 it is.
-        let z = -sqrt (1.0 - p * p)
+        let z = -sqrt(1.0 - p * p)
         (p, 0.0, (if z = 0.0 then 0.0 else z))
 
 [<RequireQualifiedAccess>]
@@ -229,7 +249,7 @@ module BufferCache =
         member _.Count = cache.Count
 
         // Every cached handle, for deletion when the backend is disposed.
-        member _.Handles : uint[] = Seq.toArray cache.Values
+        member _.Handles: uint[] = Seq.toArray cache.Values
 
 [<RequireQualifiedAccess>]
 module VoicePool =
@@ -239,10 +259,12 @@ module VoicePool =
     // SourceStop, and DeleteSource; in a test they are counting fakes, which is what lets the
     // reclaim/steal logic run with no device (#20).
     type Ops =
-        { Gen: unit -> uint
-          IsStopped: uint -> bool
-          Stop: uint -> unit
-          Delete: uint -> unit }
+        {
+            Gen: unit -> uint
+            IsStopped: uint -> bool
+            Stop: uint -> unit
+            Delete: uint -> unit
+        }
 
     // A bounded pool of one-shot voice handles. Before handing out a source it reclaims any that
     // have finished (the leak in #20: one-shots were GenSource'd and never deleted, so a long
@@ -263,6 +285,7 @@ module VoicePool =
         // Move every finished voice from `active` to `free`.
         let reclaimFinished () =
             let mutable i = 0
+
             while i < active.Count do
                 if ops.IsStopped active.[i] then
                     free.Add active.[i]
@@ -275,6 +298,7 @@ module VoicePool =
         // oldest sounding voice and reuses that handle.
         member _.Acquire() : uint =
             reclaimFinished ()
+
             let src =
                 if free.Count > 0 then
                     let s = free.[free.Count - 1]
@@ -288,6 +312,7 @@ module VoicePool =
                     active.RemoveAt 0
                     ops.Stop victim
                     victim
+
             active.Add src
             src
 
@@ -304,7 +329,10 @@ module VoicePool =
             for s in active do
                 ops.Stop s
                 ops.Delete s
-            for s in free do ops.Delete s
+
+            for s in free do
+                ops.Delete s
+
             active.Clear()
             free.Clear()
 
@@ -373,6 +401,7 @@ module AssetDiagnostics =
     // is where the product's mapping actually lives.
     let message (asset: Asset) (failure: Failure) : string =
         let what = describe asset
+
         match failure with
         | Unresolved ->
             sprintf
@@ -473,6 +502,7 @@ module DeviceDiagnostics =
     let message (op: Operation) (fault: Fault) (error: exn) : string =
         let what = describe op
         let why = sprintf "%s: %s" (error.GetType().Name) error.Message
+
         match fault with
         // "failed", not "threw". A device reports almost every failure by SETTING AN ERROR CODE and
         // returning normally — OpenAL never raises — so "threw" was accurate only for the rarest leg
@@ -530,9 +560,12 @@ module DeviceDiagnostics =
                 match consecutive.TryGetValue op with
                 | true, n -> n + 1
                 | _ -> 1
+
             consecutive.[op] <- run
+
             if firstReported.Add op then
                 emit (message op Transient error)
+
             if run >= persistentAfter && persistentReported.Add op then
                 emit (message op (Persistent run) error)
 
@@ -549,9 +582,14 @@ module DeviceDiagnostics =
                 match consecutive.TryGetValue op with
                 | true, n -> n
                 | _ -> 0
+
             consecutive.Remove op |> ignore
             // It came back. If we said it was gone, say that we were wrong — once.
-            if run >= persistentAfter && persistentReported.Contains op && recoveryReported.Add op then
+            if
+                run >= persistentAfter
+                && persistentReported.Contains op
+                && recoveryReported.Add op
+            then
                 emit (recovered op run)
 
         // `op`'s current run of consecutive faults — 0 once it has reached the device again.
@@ -570,7 +608,8 @@ module DeviceDiagnostics =
 
         // Lines emitted so far: one per operation that has faulted, one per operation that went
         // persistent, and one per operation that came back from it.
-        member _.ReportedCount = firstReported.Count + persistentReported.Count + recoveryReported.Count
+        member _.ReportedCount =
+            firstReported.Count + persistentReported.Count + recoveryReported.Count
 
 [<RequireQualifiedAccess>]
 module Audio =
@@ -614,8 +653,10 @@ module Audio =
         // the silence this family exists to end (#27/#28/#33). Describe what the PATH does.
         if not warnedRawDrop && List.exists requiresEngine effects then
             warnedRawDrop <- true
+
             eprintfn
                 "FS.GG.Audio: a batch reached IAudioBackend directly, which has no mixer and no clock — this path DROPS SetBusVolume/Duck and degrades PlaySfx3D to non-positional, so a volume slider wired this way does nothing. FS.GG.Audio.Engine realizes them: build the sink with Engine.createSink (raw host drive), or return Audio.Cmd.ofEngine instead of Audio.Cmd.ofEffects (Elmish). Keep the raw path for deliberate fire-and-forget playback."
+
         for effect in effects do
             backend.Play effect
 
@@ -628,8 +669,10 @@ module NullBackend =
     /// A bounded snapshot of effects presented to a Null backend. Unlike Evidence, these are the
     /// raw requests, retained only to explain recent silent execution.
     type DiagnosticSnapshot =
-        { Recent: AudioEffect list
-          DroppedCount: int64 }
+        {
+            Recent: AudioEffect list
+            DroppedCount: int64
+        }
 
     [<Sealed>]
     type T(silence: Silence) =
@@ -675,6 +718,7 @@ module NullBackend =
         // property that used to hold, at ~20ns uncontended against a call a game makes a handful of
         // times a frame.
         let gate = obj ()
+
         let recordDiagnostic effect =
             if diagnosticCount < DiagnosticCapacity then
                 let index = (diagnosticStart + diagnosticCount) % DiagnosticCapacity
@@ -686,10 +730,14 @@ module NullBackend =
                 diagnosticDropped <- diagnosticDropped + 1L
 
         let diagnosticSnapshot () =
-            { Recent =
-                [ for offset in 0 .. diagnosticCount - 1 do
-                      yield diagnosticRing[(diagnosticStart + offset) % DiagnosticCapacity] ]
-              DroppedCount = diagnosticDropped }
+            {
+                Recent =
+                    [
+                        for offset in 0 .. diagnosticCount - 1 do
+                            yield diagnosticRing[(diagnosticStart + offset) % DiagnosticCapacity]
+                    ]
+                DroppedCount = diagnosticDropped
+            }
 
         // The default is `Requested`: `create ()` is the product/test/CI backend asking for record-only
         // on purpose. Only `OpenAlBackend.create` builds one with `DeviceUnavailable`, and it is the
@@ -731,9 +779,11 @@ module NullBackend =
 
                 lock gate (fun () ->
                     recordDiagnostic effect
+
                     match normalized with
                     | Some effects -> recorded.AddRange effects
                     | None -> ())
+
             member _.Dispose() = ()
 
     let create () = new T()
@@ -778,12 +828,18 @@ module private OpenAl =
         let al = AL.GetApi(false)
         let alc = ALContext.GetApi(false)
         let device = alc.OpenDevice("")
-        do if NativePtr.toNativeInt device = 0n then failwith "OpenAL: no output device"
+
+        do
+            if NativePtr.toNativeInt device = 0n then
+                failwith "OpenAL: no output device"
+
         let context = alc.CreateContext(device, NativePtr.nullPtr)
+
         do
             if NativePtr.toNativeInt context = 0n then
                 alc.CloseDevice device |> ignore
                 failwith "OpenAL: could not create context"
+
         do alc.MakeContextCurrent context |> ignore
 
         // Decoded buffers are uploaded once per id and reused (#20): id-keyed caches replace the old
@@ -793,7 +849,7 @@ module private OpenAl =
 
         // The music voice is long-lived (it loops and its gain is driven by bus fades), so it is
         // tracked on its own and never pooled.
-        let mutable musicSource : uint option = None
+        let mutable musicSource: uint option = None
 
         // A one-shot voice has finished — and is reclaimable — once its source reaches Stopped.
         let sourceStopped (src: uint) : bool =
@@ -808,11 +864,14 @@ module private OpenAl =
         // One-shot voices are pooled so finished sources are reclaimed instead of leaked (#20).
         let voices =
             VoicePool.T(
-                { Gen = (fun () -> al.GenSource())
-                  IsStopped = sourceStopped
-                  Stop = (fun (s: uint) -> al.SourceStop s)
-                  Delete = (fun (s: uint) -> al.DeleteSource s) },
-                oneShotCeiling)
+                {
+                    Gen = (fun () -> al.GenSource())
+                    IsStopped = sourceStopped
+                    Stop = (fun (s: uint) -> al.SourceStop s)
+                    Delete = (fun (s: uint) -> al.DeleteSource s)
+                },
+                oneShotCeiling
+            )
 
         // Log the source-ceiling hit once (not per play), so exhaustion is visible not silent (#20).
         let mutable ceilingLogged = false
@@ -823,9 +882,13 @@ module private OpenAl =
         // this table. Master must NOT reach the listener gain here: that would apply it a second
         // time to voices whose gain already carries it.
         let busGains = Collections.Generic.Dictionary<Bus, float>()
-        do for b in [ Master; Music; Sfx; Ui; Ambient ] do busGains.[b] <- 1.0
 
-        let musicGain () = float32 (CoreAudio.clampVolume (busGains.[Music] * busGains.[Master]))
+        do
+            for b in [ Master; Music; Sfx; Ui; Ambient ] do
+                busGains.[b] <- 1.0
+
+        let musicGain () =
+            float32 (CoreAudio.clampVolume (busGains.[Music] * busGains.[Master]))
 
         // Last gain written to the music source. The Engine re-pushes every bus on every frame, so
         // without this a steady mix still costs two native writes per frame. A frame that does move
@@ -841,6 +904,7 @@ module private OpenAl =
         // pure no-op and says nothing about whether the hardware is still answering.
         let applyMusicGain () : bool =
             let gain = musicGain ()
+
             match musicSource with
             | Some src when gain <> appliedMusicGain ->
                 al.SetSourceProperty(src, SourceFloat.Gain, gain)
@@ -920,8 +984,11 @@ module private OpenAl =
                 alc.MakeContextCurrent context |> ignore
                 al.GetError() |> ignore
                 let reached = action ()
+
                 match al.GetError() with
-                | AudioError.NoError -> if reached then deviceDiagnostics.Succeeded op
+                | AudioError.NoError ->
+                    if reached then
+                        deviceDiagnostics.Succeeded op
                 | code -> deviceDiagnostics.Report(op, OpenAlError code)
             with error ->
                 deviceDiagnostics.Report(op, error)
@@ -940,8 +1007,7 @@ module private OpenAl =
             // Without this gate `bufferFormat` decides on channels/bits ALONE, so mono 16-bit
             // IMA-ADPCM passed as Mono16 and reached BufferData, which cannot know the bytes are
             // compressed and renders them as PCM: full-scale noise at the mixer's gain.
-            | Some pcm when pcm.FormatTag <> Wav.FormatPcm ->
-                Error(AssetDiagnostics.UnsupportedCodec pcm.FormatTag)
+            | Some pcm when pcm.FormatTag <> Wav.FormatPcm -> Error(AssetDiagnostics.UnsupportedCodec pcm.FormatTag)
             | Some pcm ->
                 match bufferFormat pcm.Channels pcm.BitsPerSample with
                 | None -> Error(AssetDiagnostics.UnsupportedFormat(pcm.Channels, pcm.BitsPerSample))
@@ -962,6 +1028,7 @@ module private OpenAl =
                     al.GetError() |> ignore
                     let buf = al.GenBuffer()
                     al.BufferData(buf, fmt, pcm.Data, pcm.SampleRate)
+
                     match al.GetError() with
                     | AudioError.NoError -> Ok buf
                     | code ->
@@ -996,12 +1063,14 @@ module private OpenAl =
         let soundBuffer (sound: SoundId) : uint option =
             soundBuffers.GetOrAdd(
                 sound,
-                fun () -> resolveBuffer (AssetDiagnostics.Sound sound) (fun () -> resolver.ResolveSound sound))
+                fun () -> resolveBuffer (AssetDiagnostics.Sound sound) (fun () -> resolver.ResolveSound sound)
+            )
 
         let trackBuffer (track: TrackId) : uint option =
             trackBuffers.GetOrAdd(
                 track,
-                fun () -> resolveBuffer (AssetDiagnostics.Track track) (fun () -> resolver.ResolveTrack track))
+                fun () -> resolveBuffer (AssetDiagnostics.Track track) (fun () -> resolver.ResolveTrack track)
+            )
 
         // Point an already-allocated source at `buf` and (re)start it. Every source is
         // listener-relative with the distance model switched off, so its position is read as a pure
@@ -1010,7 +1079,13 @@ module private OpenAl =
         // The source must be Stopped before this reassigns its buffer — the pool (reclaimed/stolen
         // voices) and the music path both guarantee that. OpenAL spatializes mono buffers only — a
         // stereo asset plays centred whatever we set here.
-        let configureAndPlay (src: uint) (buf: uint) (loop: bool) (gain: float32) (position: (float * float * float) option) : unit =
+        let configureAndPlay
+            (src: uint)
+            (buf: uint)
+            (loop: bool)
+            (gain: float32)
+            (position: (float * float * float) option)
+            : unit =
             al.SetSourceProperty(src, SourceInteger.Buffer, int buf)
             al.SetSourceProperty(src, SourceBoolean.Looping, loop)
             al.SetSourceProperty(src, SourceFloat.Gain, gain)
@@ -1027,11 +1102,14 @@ module private OpenAl =
             match soundBuffer sound with
             | Some buf ->
                 configureAndPlay (voices.Acquire()) buf false gain position
+
                 if voices.HasStolen && not ceilingLogged then
                     ceilingLogged <- true
+
                     eprintfn
                         "FS.GG.Audio.Host: OpenAL one-shot source ceiling (%d) reached; stealing the oldest voice per play — overlapping sounds will be dropped."
                         oneShotCeiling
+
                 true
             // Still a no-op — there is nothing to play — but no longer a *silent* one: soundBuffer
             // reported the id and the reason on its way to None (#28).
@@ -1067,6 +1145,7 @@ module private OpenAl =
                                     al.SourceStop s
                                     s
                                 | None -> al.GenSource()
+
                             let gain = musicGain ()
                             configureAndPlay src buf loop gain None
                             musicSource <- Some src
@@ -1079,7 +1158,12 @@ module private OpenAl =
                     | StopMusic ->
                         // Stopping music that is not playing reaches no device.
                         let playing = musicSource.IsSome
-                        musicSource |> Option.iter (fun s -> al.SourceStop s; al.DeleteSource s)
+
+                        musicSource
+                        |> Option.iter (fun s ->
+                            al.SourceStop s
+                            al.DeleteSource s)
+
                         musicSource <- None
                         appliedMusicGain <- -1.0f
                         playing
@@ -1095,14 +1179,24 @@ module private OpenAl =
                     // backend owns — quietly, since the `with _ -> ()` below swallows it.
                     alc.MakeContextCurrent context |> ignore
                     voices.DisposeAll()
-                    musicSource |> Option.iter (fun s -> al.SourceStop s; al.DeleteSource s)
-                    for buf in soundBuffers.Handles do al.DeleteBuffer buf
-                    for buf in trackBuffers.Handles do al.DeleteBuffer buf
+
+                    musicSource
+                    |> Option.iter (fun s ->
+                        al.SourceStop s
+                        al.DeleteSource s)
+
+                    for buf in soundBuffers.Handles do
+                        al.DeleteBuffer buf
+
+                    for buf in trackBuffers.Handles do
+                        al.DeleteBuffer buf
+
                     alc.DestroyContext context
                     alc.CloseDevice device |> ignore
                     al.Dispose()
                     alc.Dispose()
-                with _ -> ()
+                with _ ->
+                    ()
 
         interface IMixingBackend with
             member _.SetBusGain(bus: Bus, gain: float) =
@@ -1149,6 +1243,7 @@ module OpenAlBackend =
             eprintfn
                 "FS.GG.Audio.Host: OpenAL unavailable (%s) — using the non-recording Null backend, so NOTHING this process plays will be audible. This is the deliberate degrade (FR-004), not a crash. Do not rely on seeing this line: ask Backend.isDeviceBacked and surface it in your own UI."
                 ex.Message
+
             new NullBackend.T(Silence.DeviceUnavailable ex.Message) :> IAudioBackend
 
 [<RequireQualifiedAccess>]

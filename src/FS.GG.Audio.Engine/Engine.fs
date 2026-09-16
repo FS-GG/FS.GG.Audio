@@ -6,17 +6,21 @@ open FS.GG.Audio.Core
 open FS.GG.Audio.Host
 
 type SpatialConfig =
-    { RefDistance: float
-      Rolloff: float
-      MaxDistance: float option }
+    {
+        RefDistance: float
+        Rolloff: float
+        MaxDistance: float option
+    }
 
 type Voice =
-    { Sound: SoundId
-      Bus: Bus
-      RequestGain: float
-      EffectiveGain: float
-      Pan: float
-      Positional: bool }
+    {
+        Sound: SoundId
+        Bus: Bus
+        RequestGain: float
+        EffectiveGain: float
+        Pan: float
+        Positional: bool
+    }
 
 // Internal envelope vocabulary — hidden from consumers by Engine.fsi.
 type Curve =
@@ -25,31 +29,45 @@ type Curve =
     | EqualPowerIn
 
 type Fade =
-    { mutable Elapsed: float
-      Duration: float
-      StartG: float
-      EndG: float
-      Curve: Curve }
+    {
+        mutable Elapsed: float
+        Duration: float
+        StartG: float
+        EndG: float
+        Curve: Curve
+    }
 
 type Duck =
-    { mutable Elapsed: float
-      Duration: float
-      Amount: float }
+    {
+        mutable Elapsed: float
+        Duration: float
+        Amount: float
+    }
 
 [<Sealed>]
 type T(config: SpatialConfig, backend: IAudioBackend, device: DeviceDiagnostics.T) =
     let buses = [ Master; Music; Sfx; Ui; Ambient ]
     let baseGain = Dictionary<Bus, float>()
-    do for b in buses do baseGain.[b] <- 1.0
+
+    do
+        for b in buses do
+            baseGain.[b] <- 1.0
+
     let fades = Dictionary<Bus, Fade>()
     let ducks = Dictionary<Bus, Duck>()
     let mutable listener = (0.0, 0.0, 0.0)
     let mutable music: (TrackId * bool) option = None
     let mutable lastVoices: Voice list = []
-    let mixing = match backend with :? IMixingBackend as m -> Some m | _ -> None
+
+    let mixing =
+        match backend with
+        | :? IMixingBackend as m -> Some m
+        | _ -> None
 
     let clamp01 (v: float) =
-        if v <= 0.0 || Double.IsNaN v then 0.0 elif v >= 1.0 then 1.0 else v
+        if v <= 0.0 || Double.IsNaN v then 0.0
+        elif v >= 1.0 then 1.0
+        else v
 
     // NaN-total, like clamp01 above, and for the same reason: `nan < -1.0` and `nan > 1.0` are BOTH
     // false, so the obvious version hands `nan` straight back — and a `nan` Pan breaks the `[-1, 1]`
@@ -84,7 +102,11 @@ type T(config: SpatialConfig, backend: IAudioBackend, device: DeviceDiagnostics.
         // means no nan Duration is ever installed, so `p` cannot be nan today and this is defence in
         // depth rather than the fix — it makes the function total on its own terms instead of on its
         // caller's discipline, which is what let the nan through in the first place.
-        let p = if Double.IsNaN p || p < 0.0 then 0.0 elif p > 1.0 then 1.0 else p
+        let p =
+            if Double.IsNaN p || p < 0.0 then 0.0
+            elif p > 1.0 then 1.0
+            else p
+
         match curve with
         | Linear -> startG + (endG - startG) * p
         | EqualPowerOut -> startG * cos (p * Math.PI / 2.0)
@@ -100,7 +122,13 @@ type T(config: SpatialConfig, backend: IAudioBackend, device: DeviceDiagnostics.
     let duckOf (bus: Bus) =
         match ducks.TryGetValue bus with
         | true, d when d.Duration > 0.0 ->
-            let t = let r = d.Elapsed / d.Duration in (if r < 0.0 then 0.0 elif r > 1.0 then 1.0 else r)
+            let t =
+                let r = d.Elapsed / d.Duration in
+
+                (if r < 0.0 then 0.0
+                 elif r > 1.0 then 1.0
+                 else r)
+
             let tri = if t <= 0.5 then t * 2.0 else (1.0 - t) * 2.0
             1.0 - d.Amount * tri
         | _ -> 1.0
@@ -110,17 +138,27 @@ type T(config: SpatialConfig, backend: IAudioBackend, device: DeviceDiagnostics.
     // Advance envelopes by dt; commit completed fades to base and drop finished envelopes.
     let advance (dt: float) =
         let doneFades = ResizeArray<Bus>()
+
         for kv in fades do
             kv.Value.Elapsed <- kv.Value.Elapsed + dt
-            if kv.Value.Elapsed >= kv.Value.Duration then doneFades.Add kv.Key
+
+            if kv.Value.Elapsed >= kv.Value.Duration then
+                doneFades.Add kv.Key
+
         for b in doneFades do
             baseGain.[b] <- clamp01 fades.[b].EndG
             fades.Remove b |> ignore
+
         let doneDucks = ResizeArray<Bus>()
+
         for kv in ducks do
             kv.Value.Elapsed <- kv.Value.Elapsed + dt
-            if kv.Value.Elapsed >= kv.Value.Duration then doneDucks.Add kv.Key
-        for b in doneDucks do ducks.Remove b |> ignore
+
+            if kv.Value.Elapsed >= kv.Value.Duration then
+                doneDucks.Add kv.Key
+
+        for b in doneDucks do
+            ducks.Remove b |> ignore
 
     // Inverse-distance-clamped attenuation on the planar (x,z) distance + stereo pan by AZIMUTH
     // (DEC-001). y is not consulted: the model is planar, as DEC-001 decided.
@@ -128,9 +166,17 @@ type T(config: SpatialConfig, backend: IAudioBackend, device: DeviceDiagnostics.
         let (lx, _, lz) = listener
         let dx, dz = x - lx, z - lz
         let raw = sqrt (dx * dx + dz * dz)
-        let capped = match config.MaxDistance with Some m when raw > m -> m | _ -> raw
+
+        let capped =
+            match config.MaxDistance with
+            | Some m when raw > m -> m
+            | _ -> raw
+
         let d = max capped config.RefDistance
-        let att = config.RefDistance / (config.RefDistance + config.Rolloff * (d - config.RefDistance))
+
+        let att =
+            config.RefDistance
+            / (config.RefDistance + config.Rolloff * (d - config.RefDistance))
         // Pan is `dx / distance` — the SINE OF THE AZIMUTH — and it is a pure direction: how far off
         // to the side the source is, not how far away.
         //
@@ -167,11 +213,19 @@ type T(config: SpatialConfig, backend: IAudioBackend, device: DeviceDiagnostics.
 
     member _.FadeBus(bus: Bus, target: float, seconds: float) =
         let target = clamp01 target
+
         if isImmediate seconds then
             fades.Remove bus |> ignore
             baseGain.[bus] <- target
         else
-            fades.[bus] <- { Elapsed = 0.0; Duration = seconds; StartG = busGain bus; EndG = target; Curve = Linear }
+            fades.[bus] <-
+                {
+                    Elapsed = 0.0
+                    Duration = seconds
+                    StartG = busGain bus
+                    EndG = target
+                    Curve = Linear
+                }
 
     member _.CrossFade(fromBus: Bus, toBus: Bus, seconds: float) =
         // Scale the equal-power envelopes by the gains the product configured. The target used to
@@ -180,24 +234,45 @@ type T(config: SpatialConfig, backend: IAudioBackend, device: DeviceDiagnostics.
         // must not become the target's new permanent base when the cross-fade completes.
         let fromGain = clamp01 (baseOf fromBus)
         let toGain = clamp01 (baseOf toBus)
+
         if isImmediate seconds then
             fades.Remove fromBus |> ignore
             fades.Remove toBus |> ignore
             baseGain.[fromBus] <- 0.0
             baseGain.[toBus] <- toGain
         else
-            fades.[fromBus] <- { Elapsed = 0.0; Duration = seconds; StartG = fromGain; EndG = 0.0; Curve = EqualPowerOut }
-            fades.[toBus] <- { Elapsed = 0.0; Duration = seconds; StartG = 0.0; EndG = toGain; Curve = EqualPowerIn }
+            fades.[fromBus] <-
+                {
+                    Elapsed = 0.0
+                    Duration = seconds
+                    StartG = fromGain
+                    EndG = 0.0
+                    Curve = EqualPowerOut
+                }
+
+            fades.[toBus] <-
+                {
+                    Elapsed = 0.0
+                    Duration = seconds
+                    StartG = 0.0
+                    EndG = toGain
+                    Curve = EqualPowerIn
+                }
 
     member _.Step(dt: float, effects: AudioEffect list) =
         // 1. time passes.
         advance (max 0.0 dt)
         // 2. apply the frame's effects, collecting one-shot voices at current gains.
         let voices = ResizeArray<Voice>()
+
         for effect in effects do
             match effect with
-            | SetMasterVolume level -> fades.Remove Master |> ignore; baseGain.[Master] <- clamp01 level
-            | SetBusVolume(bus, level) -> fades.Remove bus |> ignore; baseGain.[bus] <- clamp01 level
+            | SetMasterVolume level ->
+                fades.Remove Master |> ignore
+                baseGain.[Master] <- clamp01 level
+            | SetBusVolume(bus, level) ->
+                fades.Remove bus |> ignore
+                baseGain.[bus] <- clamp01 level
             // `isImmediate` on the millisecond value for the same reason as the fades: a nan `ms`
             // gives a nan Duration, `duckOf` guards on `Duration > 0.0` so the duck is inert, and
             // `advance` can never retire it (`Elapsed >= nan` is false forever) — an entry that
@@ -206,22 +281,56 @@ type T(config: SpatialConfig, backend: IAudioBackend, device: DeviceDiagnostics.
             // already normalizes a nan to.
             | Duck(bus, amount, ms) ->
                 let ms = if isImmediate ms then 0.0 else ms
-                ducks.[bus] <- { Elapsed = 0.0; Duration = ms / 1000.0; Amount = clamp01 amount }
+
+                ducks.[bus] <-
+                    {
+                        Elapsed = 0.0
+                        Duration = ms / 1000.0
+                        Amount = clamp01 amount
+                    }
             | StopMusic -> music <- None
             | PlayMusic(track, loop) -> music <- Some(track, loop)
             | PlaySfx(sound, volume) ->
                 let eff = clamp01 (volume * busGain Sfx * busGain Master)
-                voices.Add { Sound = sound; Bus = Sfx; RequestGain = volume; EffectiveGain = eff; Pan = 0.0; Positional = false }
+
+                voices.Add
+                    {
+                        Sound = sound
+                        Bus = Sfx
+                        RequestGain = volume
+                        EffectiveGain = eff
+                        Pan = 0.0
+                        Positional = false
+                    }
             | PlaySfx3D(sound, x, _, z, volume) ->
                 match mixing with
                 | Some _ ->
                     let att, pan = spatial x z
                     let eff = clamp01 (volume * busGain Sfx * busGain Master * att)
-                    voices.Add { Sound = sound; Bus = Sfx; RequestGain = volume; EffectiveGain = eff; Pan = pan; Positional = true }
+
+                    voices.Add
+                        {
+                            Sound = sound
+                            Bus = Sfx
+                            RequestGain = volume
+                            EffectiveGain = eff
+                            Pan = pan
+                            Positional = true
+                        }
                 | None ->
                     // Degrade (FR-008): no 3D capability -> non-positional voice at the bus-scaled gain.
                     let eff = clamp01 (volume * busGain Sfx * busGain Master)
-                    voices.Add { Sound = sound; Bus = Sfx; RequestGain = volume; EffectiveGain = eff; Pan = 0.0; Positional = false }
+
+                    voices.Add
+                        {
+                            Sound = sound
+                            Bus = Sfx
+                            RequestGain = volume
+                            EffectiveGain = eff
+                            Pan = 0.0
+                            Positional = false
+                        }
+
         lastVoices <- List.ofSeq voices
         // 3. realize through the backend (guarded; a device hiccup is silence, not a throw).
         //
@@ -241,14 +350,18 @@ type T(config: SpatialConfig, backend: IAudioBackend, device: DeviceDiagnostics.
         // escalated, and would go straight back to being indefinite, unexplained silence. A frame that
         // never spoke to the device is evidence of nothing, and must leave the run as it found it.
         let mutable reached = false
+
         try
             match mixing with
             | Some m ->
-                for b in buses do m.SetBusGain(b, busGain b)
+                for b in buses do
+                    m.SetBusGain(b, busGain b)
+
                 let (lx, ly, lz) = listener
                 m.SetListener(lx, ly, lz)
                 reached <- true
             | None -> ()
+
             for effect in effects do
                 match effect with
                 | PlayMusic(track, loop) ->
@@ -258,34 +371,50 @@ type T(config: SpatialConfig, backend: IAudioBackend, device: DeviceDiagnostics.
                     backend.Play StopMusic
                     reached <- true
                 | _ -> ()
+
             for v in lastVoices do
                 (match mixing with
                  | Some m -> m.PlayAt(v.Sound, v.EffectiveGain, v.Pan)
                  | None -> backend.Play(PlaySfx(v.Sound, v.EffectiveGain)))
+
                 reached <- true
-            if reached then device.Succeeded DeviceDiagnostics.Realize
+
+            if reached then
+                device.Succeeded DeviceDiagnostics.Realize
         with error ->
             device.Report(DeviceDiagnostics.Realize, error)
 
 [<RequireQualifiedAccess>]
 module Engine =
-    let defaultSpatial = { RefDistance = 1.0; Rolloff = 1.0; MaxDistance = None }
+    let defaultSpatial =
+        {
+            RefDistance = 1.0
+            Rolloff = 1.0
+            MaxDistance = None
+        }
 
     // Device faults go to stderr by default — the channel FS.GG.Audio.Host already warns on (the
     // missing-asset diagnostic, the voice ceiling, OpenAL-unavailable). A lambda, not the shorter
     // `DeviceDiagnostics.T(eprintfn "%s")`: the partial application would bind Console.Error ONCE,
     // here, pinning the latch to the writer that existed at construction — so a later
     // Console.SetError would never see the line. Host.fs makes the same choice for the same reason.
-    let private stderrDevice () = DeviceDiagnostics.T(fun line -> eprintfn "%s" line)
+    let private stderrDevice () =
+        DeviceDiagnostics.T(fun line -> eprintfn "%s" line)
 
-    let create (backend: IAudioBackend) = T(defaultSpatial, backend, stderrDevice ())
+    let create (backend: IAudioBackend) =
+        T(defaultSpatial, backend, stderrDevice ())
+
     let createWith (config: SpatialConfig) (backend: IAudioBackend) = T(config, backend, stderrDevice ())
 
     let createWithDiagnostics (device: DeviceDiagnostics.T) (config: SpatialConfig) (backend: IAudioBackend) =
         T(config, backend, device)
+
     let step (engine: T) (dt: float) (effects: AudioEffect list) = engine.Step(dt, effects)
     let fadeBus (engine: T) (bus: Bus) (target: float) (seconds: float) = engine.FadeBus(bus, target, seconds)
-    let crossFade (engine: T) (fromBus: Bus) (toBus: Bus) (seconds: float) = engine.CrossFade(fromBus, toBus, seconds)
+
+    let crossFade (engine: T) (fromBus: Bus) (toBus: Bus) (seconds: float) =
+        engine.CrossFade(fromBus, toBus, seconds)
+
     let setListener (engine: T) (x: float) (y: float) (z: float) = engine.SetListener(x, y, z)
 
     // The sink family (#27). `Host.Audio.play backend` is an `AudioEffect list -> unit` that plays
@@ -304,15 +433,21 @@ module Engine =
         // Monotonic, and immune to a wall-clock step: Stopwatch, not DateTime.
         let clock = Diagnostics.Stopwatch.StartNew()
         let mutable last = ValueNone
+
         let dt () =
             let now = clock.Elapsed.TotalSeconds
+
             match last with
             // The first frame advances the engine by 0, NOT by the sink's age: a sink built at
             // startup and first driven seconds later would otherwise instantly complete any envelope
             // installed in between (a fade set up before the loop starts).
-            | ValueNone -> last <- ValueSome now; 0.0
-            | ValueSome prev -> last <- ValueSome now; now - prev
+            | ValueNone ->
+                last <- ValueSome now
+                0.0
+            | ValueSome prev ->
+                last <- ValueSome now
+                now - prev
+
         createSinkWith dt engine
 
-    let createSink (backend: IAudioBackend) : AudioEffect list -> unit =
-        createSinkOver (create backend)
+    let createSink (backend: IAudioBackend) : AudioEffect list -> unit = createSinkOver (create backend)
