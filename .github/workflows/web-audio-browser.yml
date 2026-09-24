@@ -31,7 +31,7 @@ jobs:
           node node_modules/playwright-core/cli.js install --with-deps chromium firefox webkit
       - name: Exercise the exact packed browser-audio candidate
         run: tests/WebAudio.Browser.Tests/run.sh "$RUNNER_TEMP/web-audio"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: web-audio-browser-observation
