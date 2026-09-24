@@ -13,7 +13,7 @@
          .config/kit/FS.GG.Kit.receiver.proj, which materializes the kit onto disk; Renovate bumps
          this pin and kit-materialize.yml refreshes the committed kit on that PR. -->
     <PackageVersion Include="FS.GG.Kit" Version="0.90.0" />
-    <PackageVersion Include="FSharp.Core" Version="10.1.301" />
+    <PackageVersion Include="FSharp.Core" Version="10.1.401" />
     <PackageVersion Include="Fable.Package.SDK" Version="1.4.0" />
     <PackageVersion Include="Fable.Browser.Dom" Version="2.20.0" />
     <PackageVersion Include="FS.GG.Audio.Core" Version="$(FsGgAudioVersion)" />
