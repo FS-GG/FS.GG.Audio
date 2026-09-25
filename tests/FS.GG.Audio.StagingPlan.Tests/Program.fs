@@ -66,6 +66,14 @@ let main _ =
     refuse "case-colliding file" "fs-gg-audio:case-collision-observed:" goodManifest [ { goodSource with Entries = [ goodEntry; { goodEntry with Path = "skill.md" } ] } ]
     refuse "unsupported schema" "schema-version" (bytes "{\"schemaVersion\":1,\"skills\":[]}") []
     refuse "malformed manifest" "invalid-manifest" (bytes "{") []
+    let duplicateRoot = Encoding.UTF8.GetString(goodManifest).Replace("\"schemaVersion\":2", "\"schemaVersion\":1,\"schemaVersion\":2") |> bytes
+    refuse "duplicate JSON root key" "invalid-manifest" duplicateRoot [ goodSource ]
+    let duplicateFile = Encoding.UTF8.GetString(goodManifest).Replace("\"path\":\"SKILL.md\"", "\"path\":\"ignored\",\"path\":\"SKILL.md\"") |> bytes
+    refuse "duplicate JSON file key" "invalid-manifest" duplicateFile [ goodSource ]
+    let emptyFiles = Encoding.UTF8.GetString(goodManifest).Replace("\"files\":[{\"path\":\"SKILL.md\",\"sha256\":\"" + expected + "\"}]", "\"files\":[]") |> bytes
+    refuse "empty file set" "missing-body:" emptyFiles [ goodSource ]
+    let bodyless = Encoding.UTF8.GetString(goodManifest).Replace("\"path\":\"SKILL.md\"", "\"path\":\"README.md\"") |> bytes
+    refuse "bodyless file set" "missing-body:" bodyless [ { goodSource with Entries = [ { goodEntry with Path = "README.md" } ] } ]
     refuse "duplicate source facts" "duplicate-source-fact:" goodManifest [ goodSource; goodSource ]
     let secondDigest = SHA256.HashData(bytes "B\n") |> Convert.ToHexString |> fun value -> value.ToLowerInvariant()
     let twoFiles =
@@ -75,6 +83,8 @@ let main _ =
     match Staging.prepare twoFiles [ { goodSource with Entries = [ second; goodEntry ] } ] with
     | Error issues -> failwithf "two-file plan rejected: %A" issues
     | Ok plan -> assertTrue "stage entries sorted by relative path" (plan.Entries |> List.map _.Path = [ "skills/fs-gg-audio/SKILL.md"; "skills/fs-gg-audio/examples/B.md" ])
+    let unicodeFiles = Encoding.UTF8.GetString(twoFiles).Replace("examples/B.md", "Straße.md") |> bytes
+    refuse "Unicode casefold path is unqualified" "fs-gg-audio:declared:unicode-casefold-unqualified:" unicodeFiles [ { goodSource with Entries = [ goodEntry; { second with Path = "Straße.md" } ] } ]
 
     let repoRoot = Path.GetFullPath(Path.Combine(__SOURCE_DIRECTORY__, "../.."))
     let currentManifest = File.ReadAllBytes(Path.Combine(repoRoot, "template/skill-manifest/skill-manifest.json"))

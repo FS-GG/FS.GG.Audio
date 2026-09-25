@@ -9,7 +9,8 @@ This nonpackable F# project is an FSC-06 source-only implementation. It is not c
 Full stager parity depends on the protected acceptance and readback of Audio staging repair PR #312. A later owner item must compare the F# policy against that repaired source and its independent symlink/source-closure corpus, qualify installed package bytes, then separately propose any receiver change. This project makes no such change.
 
 `Staging.prepare` adds a read-only, in-memory plan from the exact schema-v2
-manifest bytes and caller-supplied source facts. It binds the legacy `SKILL.md`
+manifest bytes and caller-supplied source facts. It refuses duplicate JSON
+properties at every depth and binds the legacy `SKILL.md`
 digest to the closed `files` set and returns relative stage paths with original
 bytes. The plan snapshots input buffers, and byte getters return copies, so a
 caller cannot change a validated plan by mutating an input or returned array.
