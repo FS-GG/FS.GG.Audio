@@ -126,6 +126,35 @@ if OperatingSystem.IsLinux() then
         check "late product root after scan refuses" unstable
         check "late product-root control preserves output" (preserved output))
 
+    withTree (fun root source _ output ->
+        let skill = Path.Combine(source, "SKILL.md")
+        let changed = bytes "MUTATE\n"
+        check "overwrite fixture preserves file length" (changed.Length = original.Length)
+        let hook path =
+            if path = "SKILL.md" then File.WriteAllBytes(skill, changed)
+        let result = LinuxPinnedCapture.prepareWithReadHook hook root manifest
+        check "source changed after first fd read" (File.ReadAllBytes skill = changed)
+        let unstable =
+            match result with
+            | Error issues -> issues |> List.contains "source-file-unstable:SKILL.md"
+            | Ok _ -> false
+        check "in-place overwrite after first pass refuses" unstable
+        check "content control preserves output" (preserved output))
+
+    withTree (fun root source _ output ->
+        let skill = Path.Combine(source, "SKILL.md")
+        let hook path =
+            if path = "SKILL.md" then
+                File.WriteAllBytes(skill, original)
+                File.SetLastWriteTimeUtc(skill, DateTime(2002, 1, 1, 0, 0, 0, DateTimeKind.Utc))
+        let result = LinuxPinnedCapture.prepareWithReadHook hook root manifest
+        let unstable =
+            match result with
+            | Error issues -> issues |> List.contains "source-file-unstable:SKILL.md"
+            | Ok _ -> false
+        check "same-byte rewrite after first pass refuses" unstable
+        check "same-byte control preserves output" (preserved output))
+
     withTree (fun root source outside output ->
         let path = Path.Combine(source, "SKILL.md")
         File.Delete path
