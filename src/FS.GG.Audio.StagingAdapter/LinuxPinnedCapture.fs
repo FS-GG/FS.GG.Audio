@@ -33,6 +33,12 @@ module LinuxPinnedCapture =
     [<DllImport("libc", SetLastError = true, EntryPoint = "statx")>]
     extern int private statx(int directory, string path, int flags, uint32 mask, nativeint buffer)
 
+    [<DllImport("libc", SetLastError = true, EntryPoint = "dup")>]
+    extern int private dup(int descriptor)
+
+    [<DllImport("libc", SetLastError = true, EntryPoint = "lseek")>]
+    extern int64 private lseek(int descriptor, int64 offset, int origin)
+
     let private number (handle: SafeFileHandle) = handle.DangerousGetHandle().ToInt32()
 
     let private openAt directory name flags =
@@ -73,21 +79,24 @@ module LinuxPinnedCapture =
         finally
             Marshal.FreeHGlobal buffer
 
-    let private directoryStamp (handle: SafeFileHandle) =
+    let private descriptorStamp label (handle: SafeFileHandle) =
         let buffer = Marshal.AllocHGlobal 256
         try
             if statx(number handle, "", AT_EMPTY_PATH, 0x7ffu, buffer) <> 0 then
-                invalidOp "source-directory-stamp-unavailable"
+                invalidOp $"{label}-stamp-unavailable"
             let bytes = Array.zeroCreate<byte> 256
             Marshal.Copy(buffer, bytes, 0, bytes.Length)
             // Require nlink, inode, size, mtime, and ctime; compare them
-            // from the opened directory rather than a later pathname lookup.
+            // from the opened descriptor rather than a later pathname lookup.
             if BitConverter.ToUInt32(bytes, 0) &&& 0x3c4u <> 0x3c4u then
-                invalidOp "source-directory-stamp-unavailable"
+                invalidOp $"{label}-stamp-unavailable"
             [| bytes.[16..19]; bytes.[32..47]; bytes.[96..127]; bytes.[136..143] |]
             |> Array.concat
         finally
             Marshal.FreeHGlobal buffer
+
+    let private directoryStamp handle = descriptorStamp "source-directory" handle
+    let private fileStamp handle = descriptorStamp "source-file" handle
 
     let internal openRegularChild (directory: SafeFileHandle) name =
         let handle = openAt (number directory) name O_NONBLOCK
@@ -101,7 +110,11 @@ module LinuxPinnedCapture =
 
     let internal readPinnedFile (handle: SafeFileHandle) =
         if descriptorType handle <> 0x8000 then invalidOp "nonregular-source:descriptor"
-        use stream = new FileStream(handle, FileAccess.Read)
+        if lseek(number handle, 0L, 0) < 0L then invalidOp "source-file-seek-failed"
+        let copy = dup(number handle)
+        if copy < 0 then invalidOp "source-file-dup-failed"
+        use copyHandle = new SafeFileHandle(nativeint copy, true)
+        use stream = new FileStream(copyHandle, FileAccess.Read)
         use captured = new MemoryStream()
         let buffer = Array.zeroCreate<byte> 8192
         let mutable count = stream.Read(buffer, 0, buffer.Length)
@@ -111,6 +124,18 @@ module LinuxPinnedCapture =
             captured.Write(buffer, 0, count)
             count <- stream.Read(buffer, 0, buffer.Length)
         captured.ToArray()
+
+    let private readPinnedFileStable afterFirstPass relative (handle: SafeFileHandle) =
+        let before = fileStamp handle
+        let first = readPinnedFile handle
+        afterFirstPass relative
+        let middle = fileStamp handle
+        if before <> middle then invalidOp $"source-file-unstable:{relative}"
+        let repeated = readPinnedFile handle
+        let after = fileStamp handle
+        if middle <> after || first <> repeated then
+            invalidOp $"source-file-unstable:{relative}"
+        first
 
     let private names (directory: SafeFileHandle) =
         let path = $"/proc/self/fd/{number directory}"
@@ -124,7 +149,8 @@ module LinuxPinnedCapture =
 
     /// Capture source bytes from pinned descriptors. Enumeration and file content
     /// are not one atomic filesystem snapshot; later output custody remains separate.
-    let private prepareCore (afterNames: string -> unit) repoRoot (manifestBytes: byte array) : Result<Staging.Plan, string list> =
+    let private prepareCore (afterNames: string -> unit) (afterRead: string -> unit)
+                            repoRoot (manifestBytes: byte array) : Result<Staging.Plan, string list> =
         if not (OperatingSystem.IsLinux()) then Error [ "linux-pinned-capture-unavailable" ]
         else
             try
@@ -159,7 +185,7 @@ module LinuxPinnedCapture =
                                 yield { Path = relative; Bytes = Array.empty; IsRegular = false; IsSymlink = false }
                             else yield! children
                         | 0x8000 ->
-                            let bytes = readPinnedFile entry
+                            let bytes = readPinnedFileStable afterRead relative entry
                             totalBytes <- totalBytes + int64 bytes.Length
                             if totalBytes > int64 maxTotalBytes then invalidOp "source-total-bytes-limit"
                             yield { Path = relative; Bytes = bytes; IsRegular = true; IsSymlink = false }
@@ -188,8 +214,12 @@ module LinuxPinnedCapture =
             | :? DllNotFoundException
             | :? EntryPointNotFoundException -> Error [ "linux-pinned-capture-unavailable" ]
 
-    let prepareFromDiskLinux repoRoot manifestBytes = prepareCore ignore repoRoot manifestBytes
+    let prepareFromDiskLinux repoRoot manifestBytes = prepareCore ignore ignore repoRoot manifestBytes
 
     // Test seam after a held-directory scan, before the discovered children are opened.
     let internal prepareWithNamesHook afterNames repoRoot manifestBytes =
-        prepareCore afterNames repoRoot manifestBytes
+        prepareCore afterNames ignore repoRoot manifestBytes
+
+    // Test seam after the first held-fd byte pass, before the plan is made.
+    let internal prepareWithReadHook afterRead repoRoot manifestBytes =
+        prepareCore ignore afterRead repoRoot manifestBytes
