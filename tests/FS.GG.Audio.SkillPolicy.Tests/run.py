@@ -73,11 +73,20 @@ with tempfile.TemporaryDirectory() as folder:
 
     refused(declared, observed + [{"path": "extra.md", "hex": "41", "regular": True}], "undeclared:")
     refused(declared, [], "missing:")
+    refused([], [], "empty-declared")
+    readme = {"path": "README.md", "hex": "41", "regular": True}
+    readme_digest = hashlib.sha256(b"A").hexdigest()
+    refused([{"path": "README.md", "sha256": readme_digest}], [readme], "missing-body")
     refused(declared, [{**observed[0], "hex": "41"}], "digest-mismatch:")
     refused(declared, [{**observed[0], "regular": False}], "not-regular:")
     refused(declared + declared, observed, "duplicate-declared:")
     refused(declared, observed + [{**observed[0], "path": "skill.md"}], "case-collision-observed:")
+    unicode_aliases = ["Straße.md", "Strasse.md"]
+    aliases_declared = declared + [{"path": path, "sha256": readme_digest} for path in unicode_aliases]
+    aliases_observed = observed + [{"path": path, "hex": "41", "regular": True} for path in unicode_aliases]
+    refused(aliases_declared, aliases_observed, "declared:unicode-casefold-unqualified:")
     refused([{**declared[0], "path": "../SKILL.md"}], observed, "declared:unsafe-component:")
+    refused([{**declared[0], "path": "bad\x00name"}], observed, "declared:control-character:")
     refused([{**declared[0], "sha256": "bad"}], observed, "invalid-digest:")
     refused([{**declared[0], "sha256": None}], observed, "invalid-digest:")
     payload.write_text('{"declared": "wrong type", "observed": []}')
@@ -88,5 +97,13 @@ with tempfile.TemporaryDirectory() as folder:
     missing_field = call("check-closure", str(payload))
     assert missing_field.returncode == 2 and json.loads(missing_field.stdout)["diagnostics"] == ["invalid-input"]
     passed += 1
+    for duplicate in (
+        '{"declared": "ignored", "declared": [], "observed": []}',
+        '{"declared": [{"path": "ignored", "path": "SKILL.md", "sha256": "' + declared[0]["sha256"] + '"}], "observed": []}',
+    ):
+        payload.write_text(duplicate)
+        rejected = call("check-closure", str(payload))
+        assert rejected.returncode == 2 and json.loads(rejected.stdout)["diagnostics"] == ["invalid-input"]
+        passed += 1
 
 print(f"audio F# skill policy black-box controls: {passed} passed")
