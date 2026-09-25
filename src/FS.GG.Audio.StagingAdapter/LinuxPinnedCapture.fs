@@ -73,6 +73,22 @@ module LinuxPinnedCapture =
         finally
             Marshal.FreeHGlobal buffer
 
+    let private directoryStamp (handle: SafeFileHandle) =
+        let buffer = Marshal.AllocHGlobal 256
+        try
+            if statx(number handle, "", AT_EMPTY_PATH, 0x7ffu, buffer) <> 0 then
+                invalidOp "source-directory-stamp-unavailable"
+            let bytes = Array.zeroCreate<byte> 256
+            Marshal.Copy(buffer, bytes, 0, bytes.Length)
+            // Require nlink, inode, size, mtime, and ctime; compare them
+            // from the opened directory rather than a later pathname lookup.
+            if BitConverter.ToUInt32(bytes, 0) &&& 0x3c4u <> 0x3c4u then
+                invalidOp "source-directory-stamp-unavailable"
+            [| bytes.[16..19]; bytes.[32..47]; bytes.[96..127]; bytes.[136..143] |]
+            |> Array.concat
+        finally
+            Marshal.FreeHGlobal buffer
+
     let internal openRegularChild (directory: SafeFileHandle) name =
         let handle = openAt (number directory) name O_NONBLOCK
         try
@@ -108,7 +124,7 @@ module LinuxPinnedCapture =
 
     /// Capture source bytes from pinned descriptors. Enumeration and file content
     /// are not one atomic filesystem snapshot; later output custody remains separate.
-    let prepareFromDiskLinux repoRoot (manifestBytes: byte array) : Result<Staging.Plan, string list> =
+    let private prepareCore (afterNames: string -> unit) repoRoot (manifestBytes: byte array) : Result<Staging.Plan, string list> =
         if not (OperatingSystem.IsLinux()) then Error [ "linux-pinned-capture-unavailable" ]
         else
             try
@@ -117,8 +133,21 @@ module LinuxPinnedCapture =
                 use products = openDirectoryChild template "product-skills"
                 let mutable entryCount = 0
                 let mutable totalBytes = 0L
+                let namesAt prefix directory =
+                    let before = directoryStamp directory
+                    let found = names directory
+                    afterNames prefix
+                    let middle = directoryStamp directory
+                    if before <> middle then invalidOp $"source-directory-unstable:{prefix}"
+                    let repeated = names directory
+                    let after = directoryStamp directory
+                    if middle <> after || found <> repeated then
+                        invalidOp $"source-directory-unstable:{prefix}"
+                    found
                 let rec capture (directory: SafeFileHandle) prefix : SourceEntry list =
-                    [ for name in names directory do
+                    let before = directoryStamp directory
+                    let found =
+                      [ for name in namesAt prefix directory do
                         entryCount <- entryCount + 1
                         if entryCount > maxEntries then invalidOp "source-entry-limit"
                         let relative = if prefix = "" then name else prefix + "/" + name
@@ -135,8 +164,12 @@ module LinuxPinnedCapture =
                             if totalBytes > int64 maxTotalBytes then invalidOp "source-total-bytes-limit"
                             yield { Path = relative; Bytes = bytes; IsRegular = true; IsSymlink = false }
                         | _ -> invalidOp $"nonregular-source:{relative}" ]
+                    if directoryStamp directory <> before then
+                        invalidOp $"source-directory-unstable:{prefix}"
+                    found
+                let productsBefore = directoryStamp products
                 let sources : SourceDirectory list =
-                    [ for name in names products do
+                    [ for name in namesAt "template/product-skills" products do
                         entryCount <- entryCount + 1
                         if entryCount > maxEntries then invalidOp "source-entry-limit"
                         use source = openDirectoryChild products name
@@ -144,6 +177,8 @@ module LinuxPinnedCapture =
                                 IsDirectory = true
                                 HasSymlinkComponent = false
                                 Entries = capture source "" } ]
+                if directoryStamp products <> productsBefore then
+                    invalidOp "source-directory-unstable:template/product-skills"
                 Staging.prepare manifestBytes sources
             with
             | :? IOException as error -> Error [ $"source-io:{error.GetType().Name}" ]
@@ -152,3 +187,9 @@ module LinuxPinnedCapture =
             | :? ArgumentException -> Error [ "source-path-invalid" ]
             | :? DllNotFoundException
             | :? EntryPointNotFoundException -> Error [ "linux-pinned-capture-unavailable" ]
+
+    let prepareFromDiskLinux repoRoot manifestBytes = prepareCore ignore repoRoot manifestBytes
+
+    // Test seam after a held-directory scan, before the discovered children are opened.
+    let internal prepareWithNamesHook afterNames repoRoot manifestBytes =
+        prepareCore afterNames repoRoot manifestBytes
