@@ -11,7 +11,9 @@ Full stager parity depends on the protected acceptance and readback of Audio sta
 `Staging.prepare` adds a read-only, in-memory plan from the exact schema-v2
 manifest bytes and caller-supplied source facts. It binds the legacy `SKILL.md`
 digest to the closed `files` set and returns relative stage paths with original
-bytes. The caller must obtain regular-file and symlink facts without following
+bytes. The plan snapshots input buffers, and byte getters return copies, so a
+caller cannot change a validated plan by mutating an input or returned array.
+The caller must obtain regular-file and symlink facts without following
 links; output overlap checks, atomic writes, package packing, and installed
 receiver proof remain outside this source candidate. Run its independent tests
 with `dotnet run --project tests/FS.GG.Audio.StagingPlan.Tests -c Release`.

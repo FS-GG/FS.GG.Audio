@@ -36,6 +36,22 @@ let main _ =
         assertTrue "original BOM and CRLF bytes retained" (plan.Entries.Head.Bytes = raw)
         assertTrue "canonical digest in stage plan" (plan.Entries.Head.Sha256 = expected)
         assertTrue "destination derived" (plan.Entries.Head.Path = "skills/fs-gg-audio/SKILL.md")
+    let manifestInput = Array.copy goodManifest
+    let bodyInput = Array.copy raw
+    let snapshotSource = { goodSource with Entries = [ { goodEntry with Bytes = bodyInput } ] }
+    let snapshot =
+        match Staging.prepare manifestInput [ snapshotSource ] with
+        | Ok plan -> plan
+        | Error issues -> failwithf "snapshot fixture rejected: %A" issues
+    manifestInput.[0] <- 0uy
+    bodyInput.[3] <- byte 'Z'
+    assertTrue "plan manifest does not alias mutable input" (snapshot.ManifestBytes = goodManifest)
+    assertTrue "stage bytes do not alias mutable input" (snapshot.Entries.Head.Bytes = raw)
+    let exposedManifest = snapshot.ManifestBytes
+    let exposedBody = snapshot.Entries.Head.Bytes
+    exposedManifest.[0] <- 0uy
+    exposedBody.[3] <- byte 'Z'
+    assertTrue "plan getters do not expose mutable backing bytes" (snapshot.ManifestBytes = goodManifest && snapshot.Entries.Head.Bytes = raw)
     refuse "missing source" "missing-source:" goodManifest []
     refuse "extra source" "undeclared-source:" goodManifest [ goodSource; { goodSource with Path = "template/product-skills/extra/" } ]
     refuse "missing declared file" "fs-gg-audio:missing:" goodManifest [ { goodSource with Entries = [] } ]

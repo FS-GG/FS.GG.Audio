@@ -21,8 +21,18 @@ module Staging =
         Entries: SourceEntry list
     }
 
-    type StageEntry = { Path: string; Bytes: byte array; Sha256: string }
-    type Plan = { ManifestBytes: byte array; Entries: StageEntry list }
+    /// A validated file snapshot. Returning a copy keeps a later staging adapter from
+    /// changing the bytes without changing the digest that this plan recorded.
+    type StageEntry internal (path: string, bytes: byte array, sha256: string) =
+        let snapshot = Array.copy bytes
+        member _.Path = path
+        member _.Bytes = Array.copy snapshot
+        member _.Sha256 = sha256
+
+    type Plan internal (manifestBytes: byte array, entries: StageEntry list) =
+        let snapshot = Array.copy manifestBytes
+        member _.ManifestBytes = Array.copy snapshot
+        member _.Entries = entries
 
     let private field (item: JsonElement) (name: string) = item.GetProperty(name)
     let private string (item: JsonElement) (name: string) = (field item name).GetString()
@@ -60,7 +70,18 @@ module Staging =
     /// supply a different decoded row set. All product files must be present and closed.
     let prepare (manifestBytes: byte array) (sources: SourceDirectory list) : Result<Plan, string list> =
         try
-            match selectedRows manifestBytes with
+            // Snapshot caller-owned arrays before parsing, checking, or constructing the
+            // plan. Both input arrays and returned getters are otherwise mutable aliases.
+            let manifestSnapshot = Array.copy manifestBytes
+            let sourceSnapshots =
+                sources
+                |> List.map (fun source ->
+                    { source with
+                        Entries =
+                            source.Entries
+                            |> List.map (fun entry ->
+                                { entry with Bytes = if isNull entry.Bytes then null else Array.copy entry.Bytes }) })
+            match selectedRows manifestSnapshot with
             | Error issues -> Error issues
             | Ok rows ->
                 let errors = ResizeArray<string>()
@@ -80,7 +101,7 @@ module Staging =
                     | None -> errors.Add($"missing-body:{id}")
                     | Some body when body.Sha256 <> bodyDigest -> errors.Add($"body-digest-mismatch:{id}")
                     | Some _ -> ()
-                    let matching = sources |> List.filter (fun source -> source.Path = suppliedBy)
+                    let matching = sourceSnapshots |> List.filter (fun source -> source.Path = suppliedBy)
                     match matching with
                     | [] -> errors.Add($"missing-source:{id}")
                     | [ source ] ->
@@ -98,16 +119,16 @@ module Staging =
                         if errors.Count = 0 then
                             for item in source.Entries do
                                 let digest = Policy.digest item.Bytes
-                                entries.Add { Path = $"skills/{id}/{item.Path}"; Bytes = item.Bytes; Sha256 = digest }
+                                entries.Add(StageEntry($"skills/{id}/{item.Path}", item.Bytes, digest))
                     | _ -> errors.Add($"duplicate-source-fact:{id}")
-                for source in sources do
+                for source in sourceSnapshots do
                     if not (rows |> List.exists (fun (_, path, _, _) -> path = source.Path)) then
                         errors.Add($"undeclared-source:{source.Path}")
                 if errors.Count > 0 then
                     errors |> Seq.distinct |> Seq.sortWith (fun a b -> StringComparer.Ordinal.Compare(a, b)) |> Seq.toList |> Error
                 else
                     entries |> Seq.sortWith (fun a b -> StringComparer.Ordinal.Compare(a.Path, b.Path)) |> Seq.toList
-                    |> fun planned -> Ok { ManifestBytes = manifestBytes; Entries = planned }
+                    |> fun planned -> Ok(Plan(manifestSnapshot, planned))
         with
         | :? JsonException
         | :? InvalidOperationException
