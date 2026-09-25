@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../src/FS.GG.Audio.StagingAdapter/ReadOnlyAdapter.fs" />
+    <Compile Include="Program.fs" />
+    <ProjectReference Include="../../src/FS.GG.Audio.SkillPolicy/FS.GG.Audio.SkillPolicy.fsproj" />
+  </ItemGroup>
+</Project>
