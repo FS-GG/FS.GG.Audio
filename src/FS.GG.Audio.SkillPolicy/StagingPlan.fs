@@ -42,9 +42,19 @@ module Staging =
         | Error _ -> true
         | Ok _ -> false
 
+    let rec private duplicateProperties (item: JsonElement) =
+        match item.ValueKind with
+        | JsonValueKind.Object ->
+            let names = HashSet<string>(StringComparer.Ordinal)
+            item.EnumerateObject()
+            |> Seq.exists (fun property -> not (names.Add property.Name) || duplicateProperties property.Value)
+        | JsonValueKind.Array -> item.EnumerateArray() |> Seq.exists duplicateProperties
+        | _ -> false
+
     let private selectedRows (raw: byte array) =
         use document = JsonDocument.Parse(ReadOnlyMemory<byte>(raw))
         let root = document.RootElement
+        if duplicateProperties root then invalidArg "raw" "duplicate JSON property"
         if (field root "schemaVersion").GetInt32() <> 2 then
             Error [ "schema-version" ]
         else
