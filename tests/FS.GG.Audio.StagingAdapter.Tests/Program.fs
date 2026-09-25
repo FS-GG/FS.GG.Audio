@@ -1,8 +1,13 @@
 open System
 open System.IO
+open System.Runtime.InteropServices
 open System.Text
+open System.Threading.Tasks
 open FS.GG.Audio.SkillPolicy
 open FS.GG.Audio.StagingAdapter
+
+[<DllImport("libc", EntryPoint = "mkfifo")>]
+extern int mkfifo(string path, uint32 mode)
 
 let bytes (text: string) = Encoding.UTF8.GetBytes text
 let original = Array.concat [ [| 0xEFuy; 0xBBuy; 0xBFuy |]; bytes "A\r\n" ]
@@ -60,9 +65,20 @@ refuse "source-root parent symlink" "unsafe-source-root:" good (fun root source 
     let physical = Path.Combine(root, "physical-template")
     Directory.Move(template, physical)
     Directory.CreateSymbolicLink(template, physical) |> ignore)
+if OperatingSystem.IsLinux() then
+    withTree (fun root source output ->
+        let fifo = Path.Combine(source, "pipe")
+        assertTrue "FIFO fixture created" (mkfifo(fifo, 0o600u) = 0)
+        let attempt = Task.Run(fun () -> ReadOnlyAdapter.prepareFromDisk root good)
+        assertTrue "FIFO read refuses promptly" (attempt.Wait(TimeSpan.FromSeconds 2.0))
+        match attempt.Result with
+        | Ok _ -> failwith "FIFO source unexpectedly accepted"
+        | Error issues ->
+            assertTrue "FIFO is nonregular" (issues |> List.exists (fun issue -> issue.StartsWith("nonregular-source:", StringComparison.Ordinal)))
+            assertTrue "FIFO refusal preserves output" (preserved output))
 let repoRoot = Path.GetFullPath(Path.Combine(__SOURCE_DIRECTORY__, "../.."))
 let currentManifest = File.ReadAllBytes(Path.Combine(repoRoot, "template", "skill-manifest", "skill-manifest.json"))
 match ReadOnlyAdapter.prepareFromDisk repoRoot currentManifest with
 | Error errors -> failwithf "current Audio source rejected: %A" errors
 | Ok plan -> assertTrue "current committed Audio source plans read-only" (plan.Entries.Length > 0)
-printfn "12 read-only adapter cases passed"
+printfn "13 read-only adapter cases passed"
