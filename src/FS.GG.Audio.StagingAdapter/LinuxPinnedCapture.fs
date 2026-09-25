@@ -147,15 +147,27 @@ module LinuxPinnedCapture =
         if entries.Length > maxEntries then invalidOp "source-entry-limit"
         entries |> Array.sortWith (fun left right -> StringComparer.Ordinal.Compare(left, right)) |> Array.toList
 
-    /// Capture source bytes from pinned descriptors. Enumeration and file content
-    /// are not one atomic filesystem snapshot; later output custody remains separate.
+    /// Capture source bytes and the physical manifest through pinned descriptors.
+    /// Rechecks detect observed drift, not an atomic cross-root snapshot.
     let private prepareCore (afterNames: string -> unit) (afterRead: string -> unit)
+                            (afterSources: unit -> unit)
                             repoRoot (manifestBytes: byte array) : Result<Staging.Plan, string list> =
         if not (OperatingSystem.IsLinux()) then Error [ "linux-pinned-capture-unavailable" ]
+        elif obj.ReferenceEquals(manifestBytes, null) then Error [ "source-manifest-null" ]
         else
             try
+                let selectedManifest = Array.copy manifestBytes
                 use repository = openDirectoryPath repoRoot
+                let repositoryStamp = directoryStamp repository
                 use template = openDirectoryChild repository "template"
+                let templateStamp = directoryStamp template
+                use manifestDirectory = openDirectoryChild template "skill-manifest"
+                let manifestDirectoryStamp = directoryStamp manifestDirectory
+                use manifestFile = openRegularChild manifestDirectory "skill-manifest.json"
+                let manifestFileStamp = fileStamp manifestFile
+                let capturedManifest =
+                    readPinnedFileStable ignore "template/skill-manifest/skill-manifest.json" manifestFile
+                if capturedManifest <> selectedManifest then invalidOp "source-manifest-mismatch"
                 use products = openDirectoryChild template "product-skills"
                 let mutable entryCount = 0
                 let mutable totalBytes = 0L
@@ -205,7 +217,26 @@ module LinuxPinnedCapture =
                                 Entries = capture source "" } ]
                 if directoryStamp products <> productsBefore then
                     invalidOp "source-directory-unstable:template/product-skills"
-                Staging.prepare manifestBytes sources
+                afterSources()
+                let heldManifest =
+                    readPinnedFileStable ignore "template/skill-manifest/skill-manifest.json" manifestFile
+                if fileStamp manifestFile <> manifestFileStamp || heldManifest <> selectedManifest then
+                    invalidOp "source-manifest-unstable"
+                // Reopen the visible path from the checkout root. A held fd alone
+                // could still point to a renamed, formerly visible manifest.
+                use currentRepository = openDirectoryPath repoRoot
+                use currentTemplate = openDirectoryChild currentRepository "template"
+                use currentManifestDirectory = openDirectoryChild currentTemplate "skill-manifest"
+                use currentManifestFile = openRegularChild currentManifestDirectory "skill-manifest.json"
+                if directoryStamp currentRepository <> repositoryStamp
+                   || directoryStamp currentTemplate <> templateStamp
+                   || directoryStamp currentManifestDirectory <> manifestDirectoryStamp
+                   || fileStamp currentManifestFile <> manifestFileStamp then
+                    invalidOp "source-manifest-unstable"
+                let currentManifest =
+                    readPinnedFileStable ignore "template/skill-manifest/skill-manifest.json" currentManifestFile
+                if currentManifest <> selectedManifest then invalidOp "source-manifest-unstable"
+                Staging.prepare selectedManifest sources
             with
             | :? IOException as error -> Error [ $"source-io:{error.GetType().Name}" ]
             | :? UnauthorizedAccessException -> Error [ "source-access-denied" ]
@@ -214,12 +245,16 @@ module LinuxPinnedCapture =
             | :? DllNotFoundException
             | :? EntryPointNotFoundException -> Error [ "linux-pinned-capture-unavailable" ]
 
-    let prepareFromDiskLinux repoRoot manifestBytes = prepareCore ignore ignore repoRoot manifestBytes
+    let prepareFromDiskLinux repoRoot manifestBytes = prepareCore ignore ignore ignore repoRoot manifestBytes
 
     // Test seam after a held-directory scan, before the discovered children are opened.
     let internal prepareWithNamesHook afterNames repoRoot manifestBytes =
-        prepareCore afterNames ignore repoRoot manifestBytes
+        prepareCore afterNames ignore ignore repoRoot manifestBytes
 
     // Test seam after the first held-fd byte pass, before the plan is made.
     let internal prepareWithReadHook afterRead repoRoot manifestBytes =
-        prepareCore ignore afterRead repoRoot manifestBytes
+        prepareCore ignore afterRead ignore repoRoot manifestBytes
+
+    // Test seam after all product roots have been captured, before the plan is made.
+    let internal prepareWithSourcesHook afterSources repoRoot manifestBytes =
+        prepareCore ignore ignore afterSources repoRoot manifestBytes
