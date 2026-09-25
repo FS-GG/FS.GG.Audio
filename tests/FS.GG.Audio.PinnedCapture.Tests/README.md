@@ -28,10 +28,20 @@ identity, mtime, and ctime around two scans and again after child capture.
 Disposable controls refuse that late file, a same-name rename/restore, and a
 product root added after its first scan.
 
+Another red-before control overwrote an opened `SKILL.md` in place after its
+only byte pass. The old capture accepted manifest-matching old bytes while the
+physical file held different, same-length bytes. The reader now checks the
+opened file's inode, size, mtime, and ctime before, between, and after two
+byte passes, and compares the passes. It refuses the overwrite and a same-byte
+rewrite in disposable controls. It still cannot detect a change after its
+final check or a hidden ABA mutation.
+
 This is Linux-only source evidence. Descriptor pinning closes the pathname
 swap for captured bytes. Repeated enumeration and stamps detect observed
 roster changes but do not establish an atomic tree snapshot: ABA, filesystem
 timestamp limits, mutation after the final check, and concurrent in-place
-file writes remain possible. No output rollback, package
+file writes outside the checked interval remain possible. The caller supplies
+manifest bytes separately, so cross-root manifest/product consistency is also
+unproved. No output rollback, package
 bytes, other-platform special-file classification, or installed receiver
 parity is proved here.
