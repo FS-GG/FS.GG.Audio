@@ -26,6 +26,9 @@ let withTree action =
     let outside = Path.Combine(root, "outside")
     let output = Path.Combine(root, "output")
     Directory.CreateDirectory source |> ignore
+    let manifestFile = Path.Combine(root, "template", "skill-manifest", "skill-manifest.json")
+    Directory.CreateDirectory(Path.Combine(root, "template", "skill-manifest")) |> ignore
+    File.WriteAllBytes(manifestFile, manifest)
     Directory.CreateDirectory outside |> ignore
     Directory.CreateDirectory output |> ignore
     File.WriteAllBytes(Path.Combine(source, "SKILL.md"), original)
@@ -154,6 +157,69 @@ if OperatingSystem.IsLinux() then
             | Ok _ -> false
         check "same-byte rewrite after first pass refuses" unstable
         check "same-byte control preserves output" (preserved output))
+
+    withTree (fun root _ _ output ->
+        let physical = Path.Combine(root, "template", "skill-manifest", "skill-manifest.json")
+        File.WriteAllBytes(physical, bytes "wrong physical manifest")
+        let result = LinuxPinnedCapture.prepareFromDiskLinux root manifest
+        check "physical manifest differs from supplied bytes" (File.ReadAllBytes physical <> manifest)
+        let refused =
+            match result with
+            | Error issues -> issues |> List.contains "source-manifest-mismatch"
+            | Ok _ -> false
+        check "wrong physical manifest refuses" refused
+        check "wrong manifest control preserves output" (preserved output))
+
+    withTree (fun root _ _ output ->
+        let physical = Path.Combine(root, "template", "skill-manifest", "skill-manifest.json")
+        let hook () = File.WriteAllBytes(physical, bytes "changed after product capture")
+        let result = LinuxPinnedCapture.prepareWithSourcesHook hook root manifest
+        check "manifest changed after source capture" (File.ReadAllBytes physical <> manifest)
+        let refused =
+            match result with
+            | Error issues -> issues |> List.contains "source-manifest-unstable"
+            | Ok _ -> false
+        check "post-capture manifest drift refuses" refused
+        check "manifest drift control preserves output" (preserved output))
+
+    withTree (fun root _ outside output ->
+        let physical = Path.Combine(root, "template", "skill-manifest", "skill-manifest.json")
+        File.Delete physical
+        File.CreateSymbolicLink(physical, Path.Combine(outside, "SKILL.md")) |> ignore
+        refused "manifest symlink before open" "source-open-no-follow:skill-manifest.json" root output)
+
+    withTree (fun root _ outside output ->
+        let physical = Path.Combine(root, "template", "skill-manifest", "skill-manifest.json")
+        let foreign = Path.Combine(outside, "same-manifest.json")
+        File.WriteAllBytes(foreign, manifest)
+        let hook () =
+            File.Move(physical, physical + ".held")
+            File.CreateSymbolicLink(physical, foreign) |> ignore
+        let result = LinuxPinnedCapture.prepareWithSourcesHook hook root manifest
+        let refused =
+            match result with
+            | Error issues ->
+                issues |> List.exists (fun issue ->
+                    issue = "source-manifest-unstable"
+                    || issue.StartsWith("source-open-no-follow:skill-manifest.json", StringComparison.Ordinal))
+            | Ok _ -> false
+        check "manifest path swap after product capture refuses" refused
+        check "manifest path swap preserves output" (preserved output))
+
+    withTree (fun root _ outside output ->
+        let physical = Path.Combine(root, "template", "skill-manifest", "skill-manifest.json")
+        let replacement = Path.Combine(outside, "same-manifest.json")
+        File.WriteAllBytes(replacement, manifest)
+        let hook () =
+            File.Move(physical, physical + ".held")
+            File.Move(replacement, physical)
+        let result = LinuxPinnedCapture.prepareWithSourcesHook hook root manifest
+        let refused =
+            match result with
+            | Error issues -> issues |> List.contains "source-manifest-unstable"
+            | Ok _ -> false
+        check "byte-identical manifest inode replacement refuses" refused
+        check "manifest inode replacement preserves output" (preserved output))
 
     withTree (fun root source outside output ->
         let path = Path.Combine(source, "SKILL.md")
