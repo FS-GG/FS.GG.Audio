@@ -26,6 +26,15 @@ def fail(message: str) -> None:
     raise SystemExit(2)
 
 
+def unique_json_object(pairs: list[tuple[str, object]]) -> dict:
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            fail(f"manifest contains duplicate JSON key {key!r}")
+        result[key] = value
+    return result
+
+
 def relative_path(value: object, label: str, *, trailing_slash: bool = False) -> Path:
     if not isinstance(value, str):
         fail(f"{label}: path must be a string")
@@ -145,8 +154,11 @@ def main() -> None:
     if any(path.is_symlink() for path in (ROOT / "template", MANIFEST.parent, MANIFEST)):
         fail("manifest path must not contain a symlink")
     manifest_bytes = MANIFEST.read_bytes()
-    doc = json.loads(manifest_bytes)
-    if doc.get("schemaVersion") != 2:
+    try:
+        doc = json.loads(manifest_bytes, object_pairs_hook=unique_json_object)
+    except (UnicodeError, json.JSONDecodeError) as error:
+        fail(f"invalid manifest JSON: {error}")
+    if not isinstance(doc, dict) or doc.get("schemaVersion") != 2:
         fail("manifest must use schemaVersion 2")
     stage(out, manifest_bytes, selected_skills(doc))
 

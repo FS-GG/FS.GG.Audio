@@ -51,6 +51,29 @@ with tempfile.TemporaryDirectory() as temporary:
     ]
     sentinel = output / "previous.txt"
     sentinel.write_text("previous package", encoding="utf-8")
+    original_staged_manifest = (output / "skill-manifest.json").read_bytes()
+
+    # Duplicate JSON members make the packaged manifest ambiguous across consumers. The pack
+    # target invokes the stager directly, so it must refuse even when a separate generator check
+    # would notice that the checked-in manifest changed.
+    duplicate_skills = (
+        '{"schemaVersion":2,"skills":[{"id":"phantom","scope":"product"}],"skills":'
+        + json.dumps([row]) + "}"
+    )
+    good_row_json = json.dumps(row)
+    assert '"path": "SKILL.md"' in good_row_json
+    duplicate_path = good_row_json.replace(
+        '"path": "SKILL.md"', '"path": "../outside", "path": "SKILL.md"'
+    )
+    for ambiguous in (
+        duplicate_skills,
+        '{"schemaVersion":2,"skills":[' + duplicate_path + "]}",
+    ):
+        manifest.write_text(ambiguous, encoding="utf-8")
+        run(script, output, 2)
+        assert sentinel.read_text(encoding="utf-8") == "previous package"
+        assert (output / "skill-manifest.json").read_bytes() == original_staged_manifest
+    write_manifest()
 
     outside = root / "outside"
     outside.mkdir()
