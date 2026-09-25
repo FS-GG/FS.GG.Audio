@@ -4,12 +4,7 @@
     <IsPackable>false</IsPackable>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="SkillPolicy.fsi" />
-    <Compile Include="SkillPolicy.fs" />
-    <Compile Include="StagingPlan.fs" />
     <Compile Include="Program.fs" />
-  </ItemGroup>
-  <ItemGroup>
-    <PackageReference Include="FSharp.Core" />
+    <ProjectReference Include="../../src/FS.GG.Audio.SkillPolicy/FS.GG.Audio.SkillPolicy.fsproj" />
   </ItemGroup>
 </Project>
