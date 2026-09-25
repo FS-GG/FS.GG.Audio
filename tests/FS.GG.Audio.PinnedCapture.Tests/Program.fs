@@ -83,6 +83,49 @@ if OperatingSystem.IsLinux() then
         check "pinned directory keeps original child after source swap" (LinuxPinnedCapture.readPinnedFile fileHandle = original)
         check "pinned directory control preserves output" (preserved output))
 
+    withTree (fun root source _ output ->
+        let extra = Path.Combine(source, "late.md")
+        let hook path =
+            if path = "" then File.WriteAllBytes(extra, outsideBytes)
+        let result = LinuxPinnedCapture.prepareWithNamesHook hook root manifest
+        check "late entry exists" (File.Exists extra)
+        let unstable =
+            match result with
+            | Error issues ->
+                issues |> List.exists (fun issue -> issue.StartsWith("source-directory-unstable:", StringComparison.Ordinal))
+            | Ok _ -> false
+        check "late entry after first scan refuses" unstable
+        check "late entry control preserves output" (preserved output))
+
+    withTree (fun root source _ output ->
+        let skill = Path.Combine(source, "SKILL.md")
+        let hook path =
+            if path = "" then
+                File.Move(skill, skill + ".parked")
+                File.Move(skill + ".parked", skill)
+                Directory.SetLastWriteTimeUtc(source, DateTime(2001, 1, 1, 0, 0, 0, DateTimeKind.Utc))
+        let result = LinuxPinnedCapture.prepareWithNamesHook hook root manifest
+        let unstable =
+            match result with
+            | Error issues -> issues |> List.contains "source-directory-unstable:"
+            | Ok _ -> false
+        check "same-name rename/restore refuses" unstable
+        check "rename/restore control preserves output" (preserved output))
+
+    withTree (fun root _ _ output ->
+        let lateRoot = Path.Combine(root, "template", "product-skills", "late")
+        let hook path =
+            if path = "template/product-skills" then
+                Directory.CreateDirectory lateRoot |> ignore
+        let result = LinuxPinnedCapture.prepareWithNamesHook hook root manifest
+        check "late product root exists" (Directory.Exists lateRoot)
+        let unstable =
+            match result with
+            | Error issues -> issues |> List.contains "source-directory-unstable:template/product-skills"
+            | Ok _ -> false
+        check "late product root after scan refuses" unstable
+        check "late product-root control preserves output" (preserved output))
+
     withTree (fun root source outside output ->
         let path = Path.Combine(source, "SKILL.md")
         File.Delete path

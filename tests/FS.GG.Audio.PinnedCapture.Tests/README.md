@@ -21,8 +21,17 @@ after `GetAttributes` accepts a regular file, a swap to a symlink makes
 directory descriptor retain the original source after the same swaps. It also
 refuses static source/file/directory symlinks and a FIFO without blocking.
 
+A separate red-before control added an undeclared file after the held source
+directory's one-pass name scan. The former capture returned a valid plan while
+the extra file remained present. The reader now compares opened-directory
+identity, mtime, and ctime around two scans and again after child capture.
+Disposable controls refuse that late file, a same-name rename/restore, and a
+product root added after its first scan.
+
 This is Linux-only source evidence. Descriptor pinning closes the pathname
-swap for captured bytes, but directory enumeration and concurrent in-place
-file writes are not an atomic tree snapshot. No output rollback, package
+swap for captured bytes. Repeated enumeration and stamps detect observed
+roster changes but do not establish an atomic tree snapshot: ABA, filesystem
+timestamp limits, mutation after the final check, and concurrent in-place
+file writes remain possible. No output rollback, package
 bytes, other-platform special-file classification, or installed receiver
 parity is proved here.
