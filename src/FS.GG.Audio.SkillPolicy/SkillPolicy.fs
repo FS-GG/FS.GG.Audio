@@ -40,6 +40,10 @@ module Policy =
             Error "non-posix-path"
         elif path |> Seq.exists Char.IsControl then
             Error "control-character"
+        elif path |> Seq.exists (fun value -> value > char 127) then
+            // Python's casefold expands some Unicode characters (for example ß to ss).
+            // OrdinalIgnoreCase cannot prove those paths collision-free.
+            Error "unicode-casefold-unqualified"
         elif path.Split('/') |> Array.exists (fun part -> part = "" || part = "." || part = "..") then
             Error "unsafe-component"
         else
@@ -51,6 +55,10 @@ module Policy =
         let declaredFolded = HashSet<string>(StringComparer.OrdinalIgnoreCase)
         let observedPaths = HashSet<string>(StringComparer.Ordinal)
         let observedFolded = HashSet<string>(StringComparer.OrdinalIgnoreCase)
+
+        if List.isEmpty declared then errors.Add("empty-declared")
+        if declared |> List.exists (fun entry -> entry.Path = "SKILL.md") |> not then
+            errors.Add("missing-body:SKILL.md")
 
         for entry in declared do
             match validatePath entry.Path with
