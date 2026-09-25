@@ -5,6 +5,7 @@ root="$(cd "$here/../.." && pwd)"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 python3 "$root/scripts/generate-skill-manifest.py" --check
+python3 "$root/tests/Skills.Package.Tests/stage-skills-closure.py"
 python3 "$here/stage-skills.py" "$work/stage"
 dotnet pack "$here/FS.GG.Audio.Skills.csproj" -c Release -o "$work/out" --no-restore
 nupkg="$work/out/FS.GG.Audio.Skills.0.1.0.nupkg"
