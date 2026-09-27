@@ -15,11 +15,14 @@
           "Fable.Core": "3.2.8"
         }
       },
-      "Fable.Package.SDK": {
+      "FS.GG.Audio.Core": {
         "type": "Direct",
-        "requested": "[1.4.0, )",
-        "resolved": "1.4.0",
-        "contentHash": "Bj7mRtJXQQyQueOKNfQ4M5Vdg7BWbCpB5IVzIUYbKAicGlTgw1OvH8q0pv0S+DSvm1JwgEEFDXYklJc6GT3i3A=="
+        "requested": "[0.6.0, )",
+        "resolved": "0.6.0",
+        "contentHash": "TBZuHK7E2vS3/8LKHtBF8+zZex5Uob+HQgDEOzVymNxCSip5qDKqnXLxiF04mdLhj+KQBGf0Yyg/joQG8mBYgA==",
+        "dependencies": {
+          "FSharp.Core": "10.1.301"
+        }
       },
       "Fable.Browser.Blob": {
         "type": "Transitive",
@@ -67,17 +70,11 @@
           "FSharp.Core": "4.7.2"
         }
       },
-      "fs.gg.audio.core": {
-        "type": "Project",
-        "dependencies": {
-          "FSharp.Core": "[10.1.401, )"
-        }
-      },
       "FSharp.Core": {
         "type": "CentralTransitive",
         "requested": "[10.1.401, )",
-        "resolved": "10.1.401",
-        "contentHash": "/lvOK51KD8IangBYkfDVna3/HrE/r4VUnX3dI01KDspctoYXmind3POeoYkqWKeXHwiKlf6Hc9TxwSnoSCWcjw=="
+        "resolved": "10.1.301",
+        "contentHash": "excLf2zM/qUB3WhRUfI0xvOOaPwcRAEdYT/BXe9eiTKySnWVuIKMQTf5+6ETy5nsb1dpLp1s2j2yAM/XcRgFMg=="
       }
     }
   }
