@@ -19,6 +19,7 @@ cat > "$work/NuGet.Config" <<CONFIG
   <packageSourceMapping><packageSource key="candidate"><package pattern="FS.GG.Audio.*" /></packageSource><packageSource key="nuget"><package pattern="*" /></packageSource></packageSourceMapping>
 </configuration>
 CONFIG
+export BrowserPackageVersion=0.5.0-svg-present.1
 dotnet restore "$work/DotNet/DotNet.fsproj" --configfile "$work/NuGet.Config"
 dotnet run --project "$work/DotNet/DotNet.fsproj" --no-restore -- "$work/dotnet.txt"
 dotnet restore "$work/Fable/Fable.fsproj" --configfile "$work/NuGet.Config"
