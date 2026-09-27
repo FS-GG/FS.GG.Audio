@@ -1,5 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework></PropertyGroup>
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
+    <!-- In-repo restore uses the released package; run.sh overrides for the isolated packed candidate. -->
+    <BrowserPackageVersion Condition="'$(BrowserPackageVersion)' == ''">0.6.0</BrowserPackageVersion>
+  </PropertyGroup>
   <ItemGroup><Compile Include="Program.fs" /></ItemGroup>
-  <ItemGroup><PackageReference Include="FS.GG.Audio.WebBrowser" Version="0.5.0-svg-present.1" /></ItemGroup>
+  <ItemGroup><PackageReference Include="FS.GG.Audio.WebBrowser" Version="$(BrowserPackageVersion)" /></ItemGroup>
 </Project>

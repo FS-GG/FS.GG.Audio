@@ -20,6 +20,7 @@ PY
 cat > "$work/NuGet.Config" <<CONFIG
 <configuration><packageSources><clear/><add key="candidate" value="$feed"/><add key="nuget" value="https://api.nuget.org/v3/index.json"/></packageSources><packageSourceMapping><packageSource key="candidate"><package pattern="FS.GG.Audio.*"/></packageSource><packageSource key="nuget"><package pattern="*"/></packageSource></packageSourceMapping></configuration>
 CONFIG
+export BrowserPackageVersion=0.5.0-svg-present.1
 dotnet restore "$work/Browser/BrowserFixture.fsproj" --configfile "$work/NuGet.Config"
 dotnet tool install fable --version 5.17.0 --tool-path "$tools" --configfile "$work/NuGet.Config"
 "$tools/fable" "$work/Browser/BrowserFixture.fsproj" --outDir "$work/Browser/generated" --noCache
