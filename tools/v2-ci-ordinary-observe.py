@@ -176,7 +176,7 @@ def observe(environ: dict[str, str], rehearsal: bool = False) -> dict:
                          else ".github/workflows/v2-ci-ordinary-settlement.yml")
     expected_event = "workflow_dispatch" if rehearsal else "push"
     expected_environment = "ordinary-v2-rehearsal" if rehearsal else "ordinary-v2"
-    if (policy["repository"] != "FS-GG/.github"
+    if (policy["repository"] != repository
             or policy["workflow"]["path"] != expected_workflow
             or policy["trigger"]["event"] != expected_event
             or policy["credentialJob"]["environment"] != expected_environment
@@ -337,9 +337,7 @@ def observe(environ: dict[str, str], rehearsal: bool = False) -> dict:
         policy, digest, runtime, [current_pull], evidence, selected_source["key"])
     receipt["runId"] = int(run_id)
     receipt["runAttempt"] = int(attempt)
-    receipt["activation"] = (
-        selected_source["key"] == "dotgithub-v1" and bool(policy["credentialJob"]["installed"])
-    )
+    receipt["activation"] = bool(policy["credentialJob"]["installed"])
     receipt["qualifiedTreeSha"] = tree
     return receipt
 
