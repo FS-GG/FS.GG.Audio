@@ -1,44 +1,52 @@
 # C3-AUDIO-01 — Ordinary V2 receiver adoption
 
-Status: source prepared and disabled. Installation and activation remain pending.
+Status: activation source prepared; package publication and credential enrollment remain pending.
 
 FS.GG.Audio is the selected C3 source repository (`FS-GG/FS.GG.Audio`, repository ID
 `1292226968`) under the `audio-v1` profile. This change adds only repository-owned receiver
-source. It does not change an existing production workflow, repository settings, an Actions
-environment, secrets, branch protection, required checks, or generated workspace content.
+source. It does not change repository settings, the existing Actions environment, secrets, branch
+protection, required checks, or generated workspace content, and it cannot reach a credential effect.
 
 ## Prepared source
 
-- The receiver workflow is bound to protected-main pushes but its only job has an unconditional
-  false guard. It contains read-only GitHub permissions, persists no checkout credential, and has
-  no credential job, environment, secret reference, package download, or settlement command.
-- The observer and qualification tools are exact copies of `.github` commit
-  `7e1ac5f4689cbc8cd9b6db93b5ed7898c0c68319`. Their SHA-256 digests are
-  `6081e1f499a618e3d019bd4508c630c6ee52d2bad018c8ecdda3e24c360e452f` and
-  `304ce2894983dec1ed5f195bf58b0e2d01bceea68365d4e18296f00c068a3b2e` respectively.
+- The secret-free predecessor now runs on protected-main pushes with read-only GitHub permissions
+  and no persisted checkout credential. It emits the only activation signal consumed by the
+  credential job.
+- The credential job is fully shaped but can run only when that exact predecessor receipt says
+  `activation=true`. The checked-in policy remains not installed, so the prepared source can emit
+  only `activation=false` and the job is skipped before environment or secret access.
+- The observer and qualification tools derive from the exact bytes at `.github` commit
+  `7e1ac5f4689cbc8cd9b6db93b5ed7898c0c68319`, with the observer boundedly adapted to accept the
+  Audio-local protected policy as its current authority and to derive activation from that policy.
+  Their SHA-256 digests are `6e63f6f724fb267e77ef02f41b4c58a833e0dc5b08c003f07fd16c89e4f7fd55`
+  and `304ce2894983dec1ed5f195bf58b0e2d01bceea68365d4e18296f00c068a3b2e` respectively.
 - The selected check population is the four current native required checks plus the additional
   `routine-eligibility` check. Each check is bound to GitHub Actions App `15368` and its exact
   workflow ID, path, event, PR head, run, job, suite, and attempt.
-- The policy remains `source-qualified-not-installed`. The future immutable Coordination CLI
-  version and package SHA-256 are deliberately null and unresolved. Credential inventory is empty.
+- The policy remains `source-qualified-not-installed`. Coordination CLI `0.1.3` candidate run
+  `36404053953` passed with candidate SHA-256
+  `c505159023f0740c885696ebe24f8e066e197d9cf09cc3e64050d4210bcd0cdb`; this is recorded only as
+  a hosted candidate pending publication. No served package has been observed or claimed.
+- The `ordinary-v2` environment exists and is restricted to the single `main` branch policy, but
+  it contains zero secrets. All three dedicated credential inventory entries remain unprovisioned.
 - The Authority target remains the shared `OpenV2` epoch and App `5064713`, installation
   `164553252`, limited to `FS-GG/FS.GG.Coordination.Authority` (`1351660651`) with
   `contents:write` and metadata read. No V1 admission or receiver-state import is used.
 
 ## Installation boundary
 
-Do not enable the workflow or add a credential job until all of these facts are available and
-verified together:
+Do not mark the policy installed or permit an `activation=true` receipt until all of these facts are
+available and verified together:
 
-1. a newly published immutable Coordination CLI supports the `audio-v1` source profile;
-2. its exact version and package SHA-256 are recorded in policy and workflow source;
-3. a dedicated `ordinary-v2` environment exists with an exact main-only deployment policy;
-4. dedicated approved ordinary-v2 credentials are enrolled without reusing V1 or callable-operation
-   credentials; and
-5. the source repository identity and current required-check population are read back again.
+1. immutable Coordination CLI `0.1.3` is published and the served archive hashes to the recorded
+   candidate SHA-256;
+2. all three dedicated ordinary-v2 credentials are enrolled and read back without reusing V1 or
+   callable-operation credentials; and
+3. the source repository identity and current required-check population are read back again.
 
-Activation is a separate reviewed source change after those prerequisites. It must add the bounded
-credential job and remove the false guard together; merely merging this source cannot settle work.
+Activation is a separate reviewed source change after those prerequisites. It changes policy status,
+installed state, served-package evidence, and credential inventory together; merely merging this
+prepared source cannot settle work.
 
 ## First activated behavior
 
