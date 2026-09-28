@@ -104,7 +104,7 @@ jobs:
           mkdir "$package_dir"
           package="$package_dir/FS.GG.Coordination.Cli.$PACKAGE_VERSION.nupkg"
           curl --fail --location --silent --show-error \
-            "https://api.nuget.org/v3-flatcontainer/fs.gg.coordination.cli/$PACKAGE_VERSION/fs.gg.coordination.cli.$PACKAGE_VERSION.nupkg" \
+            "https://github.com/FS-GG/FS.GG.Coordination/releases/download/v$PACKAGE_VERSION/FS.GG.Coordination.Cli.$PACKAGE_VERSION.nupkg" \
             --output "$package"
           test "$(sha256sum "$package" | cut -d ' ' -f 1)" = "$PACKAGE_SHA256"
           config="$RUNNER_TEMP/ordinary-v2-local-only.config"
