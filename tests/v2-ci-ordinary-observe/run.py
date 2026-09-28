@@ -120,6 +120,8 @@ class AudioObservationSourceTests(unittest.TestCase):
     def test_policy_and_anchor_bind_source_and_shared_authority_scope(self):
         policy = json.loads((ROOT / "policy/v2-ci-ordinary-settlement.json").read_text())
         anchor = json.loads((ROOT / "policy/v2-ci-ordinary-settlement-anchor.json").read_text())
+        self.assertEqual("v2-ci-i1-ordinary-settlement-v1", policy["policyId"])
+        self.assertEqual(policy["policyId"], anchor["policyId"])
         self.assertEqual(
             {
                 "profile": "audio-v1",

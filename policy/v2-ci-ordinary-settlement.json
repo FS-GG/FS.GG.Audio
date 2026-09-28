@@ -1,6 +1,6 @@
 {
   "schema": "fsgg.github.v2-ci-ordinary-settlement-policy/1",
-  "policyId": "v2-ci-audio-ordinary-settlement-v1",
+  "policyId": "v2-ci-i1-ordinary-settlement-v1",
   "status": "installed",
   "repository": "FS-GG/FS.GG.Audio",
   "repositoryId": 1292226968,
