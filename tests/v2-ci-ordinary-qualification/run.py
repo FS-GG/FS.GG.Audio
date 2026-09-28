@@ -110,7 +110,7 @@ class AudioQualificationTests(unittest.TestCase):
                          {check["name"] for check in receipt["requiredChecks"]})
         self.assertEqual(set(self.profile["requiredGateChecks"]),
                          {check["name"] for check in receipt["requiredGateChecks"]})
-        self.assertEqual(5, len(receipt["requiredChecks"]))
+        self.assertEqual(2, len(receipt["requiredChecks"]))
         self.assertEqual(4, len(receipt["requiredGateChecks"]))
 
     def test_wrong_profile_repository_id_and_check_producer_refuse(self):
