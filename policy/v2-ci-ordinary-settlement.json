@@ -1,0 +1,119 @@
+{
+  "schema": "fsgg.github.v2-ci-ordinary-settlement-policy/1",
+  "policyId": "v2-ci-audio-ordinary-settlement-v1",
+  "status": "source-qualified-not-installed",
+  "repository": "FS-GG/FS.GG.Audio",
+  "repositoryId": 1292226968,
+  "selectedSource": {
+    "profile": "audio-v1",
+    "repository": "FS-GG/FS.GG.Audio",
+    "repositoryId": 1292226968
+  },
+  "sourceImplementation": {
+    "repository": "FS-GG/.github",
+    "commit": "7e1ac5f4689cbc8cd9b6db93b5ed7898c0c68319",
+    "observerSha256": "6081e1f499a618e3d019bd4508c630c6ee52d2bad018c8ecdda3e24c360e452f",
+    "qualificationSha256": "304ce2894983dec1ed5f195bf58b0e2d01bceea68365d4e18296f00c068a3b2e"
+  },
+  "operationClass": "ordinary-post-merge-delivery-settlement",
+  "trigger": {
+    "event": "push",
+    "ref": "refs/heads/main",
+    "associationEndpoint": "GET /repos/FS-GG/FS.GG.Audio/commits/{sourceSha}/pulls",
+    "associationCount": 1,
+    "requireMerged": true,
+    "requireMergeCommitMatch": true
+  },
+  "workflow": {
+    "path": ".github/workflows/v2-ci-ordinary-settlement.yml",
+    "revision": "sourceSha",
+    "requestEventsForbidden": ["pull_request", "pull_request_target"],
+    "manualEventsForbidden": ["workflow_dispatch", "repository_dispatch"]
+  },
+  "qualification": {
+    "phase": "secret-free-predecessor",
+    "credentialAccess": false,
+    "producerStatus": "trusted-main-push-predecessor",
+    "currentValidatorRole": "native-API-derived-evidence",
+    "requiredCheckAppId": 15368,
+    "requiredChecks": [
+      "Build + test (locked restore, net10.0, headless)",
+      "lock-ranges / lock-ranges",
+      "kit / coordination-kit",
+      "materialize / receiver-validate",
+      "routine-eligibility"
+    ],
+    "requiredGateChecks": [
+      "Build + test (locked restore, net10.0, headless)",
+      "lock-ranges / lock-ranges",
+      "kit / coordination-kit",
+      "materialize / receiver-validate"
+    ],
+    "checkProducers": {
+      "Build + test (locked restore, net10.0, headless)": {
+        "workflowId": 308685627,
+        "path": ".github/workflows/gate.yml",
+        "event": "pull_request"
+      },
+      "lock-ranges / lock-ranges": {
+        "workflowId": 308685627,
+        "path": ".github/workflows/gate.yml",
+        "event": "pull_request"
+      },
+      "kit / coordination-kit": {
+        "workflowId": 310136059,
+        "path": ".github/workflows/coordination-coherence.yml",
+        "event": "pull_request"
+      },
+      "materialize / receiver-validate": {
+        "workflowId": 316870238,
+        "path": ".github/workflows/kit-materialize.yml",
+        "event": "pull_request"
+      },
+      "routine-eligibility": {
+        "workflowId": 357682791,
+        "path": ".github/workflows/routine-eligibility.yml",
+        "event": "pull_request_target"
+      }
+    }
+  },
+  "credentialJob": {
+    "environment": "ordinary-v2",
+    "runner": "github-hosted-ephemeral",
+    "requiredReviewers": 0,
+    "protectedBranchesOnly": true,
+    "allowedBranches": ["main"],
+    "installed": false,
+    "liveObservation": {
+      "observedAt": "2026-09-28",
+      "environmentPresent": false,
+      "repositorySecretCount": 0,
+      "disposition": "source-only-disabled"
+    }
+  },
+  "packagePin": {
+    "status": "unresolved",
+    "version": null,
+    "sha256": null,
+    "requiredCapability": "audio-v1 selected source",
+    "requiredBeforeActivation": true
+  },
+  "credentialInventory": [],
+  "activationPrerequisites": [
+    "published immutable Coordination CLI with audio-v1 support",
+    "verified package SHA-256",
+    "dedicated ordinary-v2 environment restricted to main",
+    "dedicated approved ordinary-v2 secrets",
+    "current source-check population readback"
+  ],
+  "forbiddenCredentialReuse": [
+    "CALLABLE_ISOLATED_OPERATION_APP_PRIVATE_KEY",
+    "V1_ADMISSION_AUTHORIZER_PRIVATE_KEY",
+    "V1_ADMISSION_APP_PRIVATE_KEY"
+  ],
+  "unchangedGates": ["OpenV2"],
+  "migration": {
+    "v1Admission": false,
+    "receiverStateImport": false
+  }
+}
