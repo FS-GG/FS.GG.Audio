@@ -96,6 +96,11 @@ class AudioObservationSourceTests(unittest.TestCase):
             "PACKAGE_SHA256: c505159023f0740c885696ebe24f8e066e197d9cf09cc3e64050d4210bcd0cdb",
             workflow,
         )
+        self.assertIn(
+            "https://github.com/FS-GG/FS.GG.Coordination/releases/download/v$PACKAGE_VERSION/FS.GG.Coordination.Cli.$PACKAGE_VERSION.nupkg",
+            workflow,
+        )
+        self.assertNotIn("api.nuget.org/v3-flatcontainer", workflow)
         self.assertIn("ordinary-settlement execute", workflow)
         for name in (
             "V2_ORDINARY_APP_ID", "V2_ORDINARY_APP_PRIVATE_KEY",
