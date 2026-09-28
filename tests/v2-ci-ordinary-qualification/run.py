@@ -144,20 +144,21 @@ class AudioQualificationTests(unittest.TestCase):
         with self.assertRaisesRegex(MODULE.Refusal, "wrong repository"):
             self.qualify(associations=associations)
 
-    def test_policy_remains_disabled_with_pending_candidate_and_unenrolled_credentials(self):
+    def test_policy_remains_disabled_with_published_package_and_unenrolled_credentials(self):
         self.assertEqual("source-qualified-not-installed", self.policy["status"])
         self.assertFalse(self.policy["credentialJob"]["installed"])
         self.assertEqual(3, len(self.policy["credentialInventory"]))
         self.assertTrue(all(item["provisioned"] is False
                             for item in self.policy["credentialInventory"]))
-        self.assertEqual("hosted-candidate-pending-publication",
+        self.assertEqual("published-served-verified",
                          self.policy["packagePin"]["status"])
         self.assertEqual("0.1.3", self.policy["packagePin"]["version"])
         self.assertEqual(
             "c505159023f0740c885696ebe24f8e066e197d9cf09cc3e64050d4210bcd0cdb",
             self.policy["packagePin"]["sha256"],
         )
-        self.assertFalse(self.policy["packagePin"]["servedPackageVerified"])
+        self.assertEqual(36407941780, self.policy["packagePin"]["publishRunId"])
+        self.assertTrue(self.policy["packagePin"]["servedPackageVerified"])
         self.assertEqual(["OpenV2"], self.policy["unchangedGates"])
         self.assertEqual({"v1Admission": False, "receiverStateImport": False},
                          self.policy["migration"])

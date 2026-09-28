@@ -134,13 +134,16 @@ class AudioObservationSourceTests(unittest.TestCase):
         self.assertEqual("main", observation["customBranchPolicy"])
         self.assertEqual(1, observation["customBranchPolicyCount"])
         self.assertEqual(0, observation["secretCount"])
-        self.assertEqual("hosted-candidate-pending-publication", policy["packagePin"]["status"])
+        self.assertEqual("published-served-verified", policy["packagePin"]["status"])
         self.assertEqual("0.1.3", policy["packagePin"]["version"])
         self.assertEqual(
             "c505159023f0740c885696ebe24f8e066e197d9cf09cc3e64050d4210bcd0cdb",
             policy["packagePin"]["sha256"],
         )
-        self.assertFalse(policy["packagePin"]["servedPackageVerified"])
+        self.assertEqual(36407941780, policy["packagePin"]["publishRunId"])
+        self.assertEqual("FS.GG.Coordination.Cli.0.1.3.nupkg",
+                         policy["packagePin"]["assetName"])
+        self.assertTrue(policy["packagePin"]["servedPackageVerified"])
         self.assertTrue(all(item["provisioned"] is False
                             for item in policy["credentialInventory"]))
         self.assertEqual(5064713, anchor["writer"]["appId"])
