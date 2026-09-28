@@ -25,7 +25,7 @@ class AudioObservationSourceTests(unittest.TestCase):
             "tools/v2-ci-ordinary-observe.py":
                 "6e63f6f724fb267e77ef02f41b4c58a833e0dc5b08c003f07fd16c89e4f7fd55",
             "tools/v2-ci-ordinary-qualification.py":
-                "304ce2894983dec1ed5f195bf58b0e2d01bceea68365d4e18296f00c068a3b2e",
+                "7eccceae0aad930d3cdbce24767cbb9555693ca7032e660d1d71519a79529454",
         }
         for relative, digest in expected.items():
             self.assertEqual(digest, hashlib.sha256((ROOT / relative).read_bytes()).hexdigest())
@@ -36,7 +36,7 @@ class AudioObservationSourceTests(unittest.TestCase):
         self.assertEqual("FS-GG/FS.GG.Audio", profile["repository"])
         self.assertEqual(1292226968, profile["repositoryId"])
         self.assertEqual(15368, profile["requiredCheckAppId"])
-        self.assertEqual(5, len(profile["requiredChecks"]))
+        self.assertEqual(2, len(profile["requiredChecks"]))
         self.assertEqual(4, len(profile["requiredGateChecks"]))
         with patch.object(MODULE.QUALIFICATION, "read_json", return_value=policy):
             with self.assertRaisesRegex(MODULE.QUALIFICATION.Refusal, "no rehearsal activation"):

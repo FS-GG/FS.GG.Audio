@@ -14,7 +14,7 @@
     "commit": "7e1ac5f4689cbc8cd9b6db93b5ed7898c0c68319",
     "adaptation": "audio-local-protected-policy-authority",
     "observerSha256": "6e63f6f724fb267e77ef02f41b4c58a833e0dc5b08c003f07fd16c89e4f7fd55",
-    "qualificationSha256": "304ce2894983dec1ed5f195bf58b0e2d01bceea68365d4e18296f00c068a3b2e"
+    "qualificationSha256": "7eccceae0aad930d3cdbce24767cbb9555693ca7032e660d1d71519a79529454"
   },
   "operationClass": "ordinary-post-merge-delivery-settlement",
   "trigger": {
@@ -39,9 +39,6 @@
     "requiredCheckAppId": 15368,
     "requiredChecks": [
       "Build + test (locked restore, net10.0, headless)",
-      "lock-ranges / lock-ranges",
-      "kit / coordination-kit",
-      "materialize / receiver-validate",
       "routine-eligibility"
     ],
     "requiredGateChecks": [

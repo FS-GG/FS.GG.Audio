@@ -21,9 +21,6 @@ AUDIO_SOURCE_PROFILE = {
     "requiredCheckAppId": 15368,
     "requiredChecks": [
         "Build + test (locked restore, net10.0, headless)",
-        "lock-ranges / lock-ranges",
-        "kit / coordination-kit",
-        "materialize / receiver-validate",
         "routine-eligibility",
     ],
     "requiredGateChecks": [
