@@ -1,7 +1,7 @@
 {
   "schema": "fsgg.github.v2-ci-ordinary-settlement-policy/1",
   "policyId": "v2-ci-audio-ordinary-settlement-v1",
-  "status": "source-qualified-not-installed",
+  "status": "installed",
   "repository": "FS-GG/FS.GG.Audio",
   "repositoryId": 1292226968,
   "selectedSource": {
@@ -84,9 +84,9 @@
     "requiredReviewers": 0,
     "protectedBranchesOnly": true,
     "allowedBranches": ["main"],
-    "installed": false,
+    "installed": true,
     "liveObservation": {
-      "observedAt": "2026-09-28",
+      "observedAt": "2026-09-28T10:37:35Z",
       "environmentPresent": true,
       "environmentId": 22908296207,
       "environmentNodeId": "EN_kwDOTQXRmM8AAAAFVXDcDw",
@@ -98,8 +98,13 @@
       "customBranchPolicies": true,
       "canAdminsBypass": true,
       "requiredReviewerCount": 0,
-      "secretCount": 0,
-      "disposition": "main-only-environment-present-custody-pending"
+      "secretCount": 3,
+      "secretNames": [
+        "V2_ORDINARY_APP_ID",
+        "V2_ORDINARY_APP_PRIVATE_KEY",
+        "V2_ORDINARY_AUTHORIZER_PRIVATE_KEY"
+      ],
+      "disposition": "dedicated-custody-enrolled-main-only"
     }
   },
   "packagePin": {
@@ -123,28 +128,56 @@
       "name": "V2_ORDINARY_AUTHORIZER_PRIVATE_KEY",
       "purpose": "sign canonical ordinary-v2 settlement intent",
       "generation": "new-v2-dedicated",
-      "provisioned": false,
+      "provisioned": true,
       "publicIdentity": "ordinary-v2-production-6121c3f2ab38acf3; spki-sha256:6121c3f2ab38acf38a37f782eb7775da78598b9cfabc0054917d3d59fe50e3ee"
     },
     {
       "name": "V2_ORDINARY_APP_ID",
       "purpose": "identify the repository-scoped ordinary-v2 GitHub App",
       "generation": "new-v2-dedicated",
-      "provisioned": false,
+      "provisioned": true,
       "publicIdentity": "app:5064713; installation:164553252"
     },
     {
       "name": "V2_ORDINARY_APP_PRIVATE_KEY",
       "purpose": "mint a short-lived repository-scoped installation token",
       "generation": "new-v2-dedicated",
-      "provisioned": false,
+      "provisioned": true,
       "publicIdentity": "app:5064713; installation:164553252"
     }
   ],
-  "activationPrerequisites": [
-    "all three dedicated ordinary-v2 secrets are enrolled and read back",
-    "current source-check population readback"
-  ],
+  "credentialEnrollmentEvidence": {
+    "status": "installed-and-independently-read-back",
+    "bridgeRepository": "FS-GG/.github",
+    "bridgeRepositoryId": 1269292704,
+    "bridgeCommit": "7915f1b8bb9b7d57fbaba2933239563e72832fe7",
+    "bridgeWorkflow": ".github/workflows/c3-audio-ordinary-enrollment-bridge.yml",
+    "bridgeRunId": 36410714353,
+    "bridgeRunAttempt": 1,
+    "bridgeConclusion": "success",
+    "ciphertextPacketVerification": "exact-current-run-policy-key-empty-inventory",
+    "encryptedPutCount": 3,
+    "readBackAt": "2026-09-28T10:37:35Z"
+  },
+  "activationEvidence": {
+    "observedAt": "2026-09-28T10:38:59Z",
+    "sourceMainSha": "08a46576320b0043d43a0ce4eeffb3cd2e736e56",
+    "sourceRepositoryId": 1292226968,
+    "requiredCheckAppId": 15368,
+    "requiredGateChecks": [
+      "Build + test (locked restore, net10.0, headless)",
+      "lock-ranges / lock-ranges",
+      "kit / coordination-kit",
+      "materialize / receiver-validate"
+    ],
+    "authorityRepository": "FS-GG/FS.GG.Coordination.Authority",
+    "authorityRepositoryId": 1351660651,
+    "writerRulesetId": 21872113,
+    "writerRulesetEnforcement": "active",
+    "integrityRulesetId": 21872115,
+    "integrityRulesetEnforcement": "active"
+  },
+  "activationPrerequisites": [],
   "forbiddenCredentialReuse": [
     "CALLABLE_ISOLATED_OPERATION_APP_PRIVATE_KEY",
     "V1_ADMISSION_AUTHORIZER_PRIVATE_KEY",

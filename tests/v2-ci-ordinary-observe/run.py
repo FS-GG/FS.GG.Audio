@@ -127,13 +127,22 @@ class AudioObservationSourceTests(unittest.TestCase):
                          policy["sourceImplementation"]["commit"])
         self.assertEqual("audio-local-protected-policy-authority",
                          policy["sourceImplementation"]["adaptation"])
-        self.assertFalse(policy["credentialJob"]["installed"])
+        self.assertEqual("installed", policy["status"])
+        self.assertTrue(policy["credentialJob"]["installed"])
         observation = policy["credentialJob"]["liveObservation"]
         self.assertTrue(observation["environmentPresent"])
         self.assertEqual(22908296207, observation["environmentId"])
         self.assertEqual("main", observation["customBranchPolicy"])
         self.assertEqual(1, observation["customBranchPolicyCount"])
-        self.assertEqual(0, observation["secretCount"])
+        self.assertEqual(3, observation["secretCount"])
+        self.assertEqual(
+            {
+                "V2_ORDINARY_APP_ID",
+                "V2_ORDINARY_APP_PRIVATE_KEY",
+                "V2_ORDINARY_AUTHORIZER_PRIVATE_KEY",
+            },
+            set(observation["secretNames"]),
+        )
         self.assertEqual("published-served-verified", policy["packagePin"]["status"])
         self.assertEqual("0.1.3", policy["packagePin"]["version"])
         self.assertEqual(
@@ -144,8 +153,12 @@ class AudioObservationSourceTests(unittest.TestCase):
         self.assertEqual("FS.GG.Coordination.Cli.0.1.3.nupkg",
                          policy["packagePin"]["assetName"])
         self.assertTrue(policy["packagePin"]["servedPackageVerified"])
-        self.assertTrue(all(item["provisioned"] is False
+        self.assertTrue(all(item["provisioned"] is True
                             for item in policy["credentialInventory"]))
+        self.assertEqual(36410714353,
+                         policy["credentialEnrollmentEvidence"]["bridgeRunId"])
+        self.assertEqual(3, policy["credentialEnrollmentEvidence"]["encryptedPutCount"])
+        self.assertEqual([], policy["activationPrerequisites"])
         self.assertEqual(5064713, anchor["writer"]["appId"])
         self.assertEqual(164553252, anchor["writer"]["installationId"])
         self.assertEqual("FS-GG/FS.GG.Coordination.Authority", anchor["writer"]["repository"])

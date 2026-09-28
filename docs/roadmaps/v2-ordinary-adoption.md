@@ -1,6 +1,6 @@
 # C3-AUDIO-01 — Ordinary V2 receiver adoption
 
-Status: activation source prepared and CLI published; credential enrollment remains pending.
+Status: activation source complete; merge and first protected-main settlement remain pending review.
 
 FS.GG.Audio is the selected C3 source repository (`FS-GG/FS.GG.Audio`, repository ID
 `1292226968`) under the `audio-v1` profile. This change adds only repository-owned receiver
@@ -13,8 +13,9 @@ protection, required checks, or generated workspace content, and it cannot reach
   and no persisted checkout credential. It emits the only activation signal consumed by the
   credential job.
 - The credential job is fully shaped but can run only when that exact predecessor receipt says
-  `activation=true`. The checked-in policy remains not installed, so the prepared source can emit
-  only `activation=false` and the job is skipped before environment or secret access.
+  `activation=true`. The checked-in installed policy can produce that result only after binding the
+  exact protected-main merge, associated PR head/tree, native checks, producer workflows, and current
+  policy/workflow/anchor bytes.
 - The observer and qualification tools derive from the exact bytes at `.github` commit
   `7e1ac5f4689cbc8cd9b6db93b5ed7898c0c68319`, with the observer boundedly adapted to accept the
   Audio-local protected policy as its current authority and to derive activation from that policy.
@@ -23,29 +24,26 @@ protection, required checks, or generated workspace content, and it cannot reach
 - The selected check population is the four current native required checks plus the additional
   `routine-eligibility` check. Each check is bound to GitHub Actions App `15368` and its exact
   workflow ID, path, event, PR head, run, job, suite, and attempt.
-- The policy remains `source-qualified-not-installed`. Coordination CLI `0.1.3` was published by
+- The policy is `installed`. Coordination CLI `0.1.3` was published by
   protected run `36407941780` and independently read back from release `v0.1.3`. Its served
   `FS.GG.Coordination.Cli.0.1.3.nupkg` asset has SHA-256
   `c505159023f0740c885696ebe24f8e066e197d9cf09cc3e64050d4210bcd0cdb`, exactly matching hosted
   candidate run `36404053953`.
-- The `ordinary-v2` environment exists and is restricted to the single `main` branch policy, but
-  it contains zero secrets. All three dedicated credential inventory entries remain unprovisioned.
+- The `ordinary-v2` environment is restricted to the single `main` branch policy. Protected bridge
+  run `36410714353` sealed the existing dedicated custody to Audio's environment key, verified its
+  signed exact-run/policy/key/empty-inventory packet, and applied exactly three encrypted values.
+  Independent readback at `2026-09-28T10:37:35Z` returned exactly the three expected secret names.
 - The Authority target remains the shared `OpenV2` epoch and App `5064713`, installation
   `164553252`, limited to `FS-GG/FS.GG.Coordination.Authority` (`1351660651`) with
   `contents:write` and metadata read. No V1 admission or receiver-state import is used.
 
 ## Installation boundary
 
-Do not mark the policy installed or permit an `activation=true` receipt until all of these facts are
-available and verified together:
-
-1. all three dedicated ordinary-v2 credentials are enrolled and read back without reusing V1 or
-   callable-operation credentials; and
-2. the source repository identity and current required-check population are read back again.
-
-Activation is a separate reviewed source change after those prerequisites. It changes policy status,
-installed state, served-package evidence, and credential inventory together; merely merging this
-prepared source cannot settle work.
+Fresh readback at `2026-09-28T10:38:59Z` reconfirmed Audio main `08a4657`, repository ID
+`1292226968`, the four exact App-`15368` required contexts, Authority repository `1351660651`, and
+active writer/integrity rulesets `21872113`/`21872115`. The policy, installed state, served package,
+credential inventory, and Authority binding are now coherent. Review and hosted exact-head checks
+remain the merge boundary; this source is not itself a settlement receipt.
 
 ## First activated behavior
 

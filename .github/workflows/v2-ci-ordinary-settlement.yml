@@ -1,4 +1,4 @@
-name: V2 ordinary post-merge settlement (activation prepared)
+name: V2 ordinary post-merge settlement
 
 on:
   push:
@@ -54,8 +54,7 @@ jobs:
   settle:
     name: ordinary-v2-credential-settlement
     needs: [preflight]
-    # The policy remains not installed until dedicated custody enrollment is
-    # read back, so preflight can only emit false.
+    # Only the exact secret-free predecessor receipt can admit this job.
     if: needs.preflight.outputs.activation == 'true'
     environment: ordinary-v2
     runs-on: ubuntu-latest
