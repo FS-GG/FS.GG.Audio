@@ -1,11 +1,12 @@
 # C3-AUDIO-01 — Ordinary V2 receiver adoption
 
-Status: activation source complete; merge and first protected-main settlement remain pending review.
+Status: **C3-AUDIO-01 complete for the selected Audio receiver**. Protected-main settlement and
+normal whole-run already-complete replay were independently read back on 2026-09-28.
 
 FS.GG.Audio is the selected C3 source repository (`FS-GG/FS.GG.Audio`, repository ID
 `1292226968`) under the `audio-v1` profile. This change adds only repository-owned receiver
-source. It does not change repository settings, the existing Actions environment, secrets, branch
-protection, required checks, or generated workspace content, and it cannot reach a credential effect.
+source and an explicitly selected ordinary-V2 installation. It does not change branch protection,
+native required checks, or generated workspace content.
 
 ## Prepared source
 
@@ -20,9 +21,9 @@ protection, required checks, or generated workspace content, and it cannot reach
   `7e1ac5f4689cbc8cd9b6db93b5ed7898c0c68319`, with the observer boundedly adapted to accept the
   Audio-local protected policy as its current authority and to derive activation from that policy.
   Their SHA-256 digests are `6e63f6f724fb267e77ef02f41b4c58a833e0dc5b08c003f07fd16c89e4f7fd55`
-  and `304ce2894983dec1ed5f195bf58b0e2d01bceea68365d4e18296f00c068a3b2e` respectively.
-- The selected check population is the four current native required checks plus the additional
-  `routine-eligibility` check. Each check is bound to GitHub Actions App `15368` and its exact
+  and `7eccceae0aad930d3cdbce24767cbb9555693ca7032e660d1d71519a79529454` respectively.
+- The selected settlement checks are `Build + test` and `routine-eligibility`; all four native
+  required gates are verified separately. Each check is bound to GitHub Actions App `15368` and its exact
   workflow ID, path, event, PR head, run, job, suite, and attempt.
 - The policy is `installed`. Coordination CLI `0.1.3` was published by
   protected run `36407941780` and independently read back from release `v0.1.3`. Its served
@@ -37,22 +38,27 @@ protection, required checks, or generated workspace content, and it cannot reach
   `164553252`, limited to `FS-GG/FS.GG.Coordination.Authority` (`1351660651`) with
   `contents:write` and metadata read. No V1 admission or receiver-state import is used.
 
-## Installation boundary
+## Installed settlement and replay
 
-Fresh readback at `2026-09-28T10:38:59Z` reconfirmed Audio main `08a4657`, repository ID
-`1292226968`, the four exact App-`15368` required contexts, Authority repository `1351660651`, and
-active writer/integrity rulesets `21872113`/`21872115`. The policy, installed state, served package,
-credential inventory, and Authority binding are now coherent. Review and hosted exact-head checks
-remain the merge boundary; this source is not itself a settlement receipt.
+Activation [PR #327](https://github.com/FS-GG/FS.GG.Audio/pull/327) merged at
+`04f07ac2ec7cd9b2a57c76bf2d5e18d27d99e921` after native checks. Three protected attempts
+exposed bounded integration mismatches and stopped before an Authority write: NuGet archive byte identity,
+shared Authority policy ID, and settlement check population. [PRs #330](https://github.com/FS-GG/FS.GG.Audio/pull/330),
+[#331](https://github.com/FS-GG/FS.GG.Audio/pull/331) and
+[#332](https://github.com/FS-GG/FS.GG.Audio/pull/332) repaired these in source under the normal gate.
 
-## First activated behavior
+[Protected run `36413290713`](https://github.com/FS-GG/FS.GG.Audio/actions/runs/36413290713) on
+main `99207b52298352f16cd383b5d389b0dacb4b49ca` then passed secret-free preflight, installed
+the pinned public CLI archive, and returned `SettlementSucceeded` with receipt digest
+`9605af1e28ae79518018d03ca4fdfe5c33ab33c268153ec25d2220830fb9fc4e`. Independent Authority
+readback found one complete entry for that digest under
+`refs/heads/fsgg/v2/journal/operation/9a` at commit
+`a51c567cb5f738402d3ee6c76eff96ecae8ac49a`. A normal whole-run rerun (attempt 2) passed both jobs
+and returned `SettlementAlreadyComplete` with the identical digest. The journal head remained
+`a51c567cb5f738402d3ee6c76eff96ecae8ac49a` with one entry, establishing no second write.
 
-For the first protected-main merge after activation, the secret-free predecessor will bind the
-single merged PR, exact qualified head/tree, Audio repository identity, all four native gates and
-`routine-eligibility`, then retain its public receipt. Only a matching receipt with activation true
-may reach the credential job and invoke the pinned Audio-capable CLI against the shared Authority
-journal. A normal rerun must read back the already-complete result without creating a second
-settlement. Failure leaves the receiver disabled or is repaired forward; no migration rollback or
-legacy state recovery is part of this adoption.
+This closes explicit Audio adoption only. It does not imply another repository is activated, a V1
+migration was performed, or that an unrelated lifecycle default changed. Future failures use source
+repair and protected readback; no legacy rollback obligation was introduced.
 
 Telemetry attempt `c3-audio-receiver-20260928` is `not-configured`; no usage total is claimed.
