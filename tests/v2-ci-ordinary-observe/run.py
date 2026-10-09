@@ -23,7 +23,7 @@ class AudioObservationSourceTests(unittest.TestCase):
     def test_tools_are_exact_committed_profile_bytes(self):
         expected = {
             "tools/v2-ci-ordinary-observe.py":
-                "6e63f6f724fb267e77ef02f41b4c58a833e0dc5b08c003f07fd16c89e4f7fd55",
+                "7f5500d810ab9169d967f8c19fbcb01d706ebf82fdeea6e4a6927b0b19eef29a",
             "tools/v2-ci-ordinary-qualification.py":
                 "7eccceae0aad930d3cdbce24767cbb9555693ca7032e660d1d71519a79529454",
         }
@@ -90,10 +90,10 @@ class AudioObservationSourceTests(unittest.TestCase):
         self.assertIn("FSGG_V2_SOURCE_PROFILE: audio-v1", workflow)
         self.assertIn("persist-credentials: false", workflow)
         self.assertIn("python3 tools/v2-ci-ordinary-observe.py produce", workflow)
-        self.assertIn("python3 tools/v2-ci-ordinary-observe.py verify", workflow)
-        self.assertIn("PACKAGE_VERSION: 0.1.3", workflow)
+        self.assertIn("python3 tools/v2-ci-ordinary-observe.py verify-main", workflow)
+        self.assertIn("PACKAGE_VERSION: 0.3.0", workflow)
         self.assertIn(
-            "PACKAGE_SHA256: c505159023f0740c885696ebe24f8e066e197d9cf09cc3e64050d4210bcd0cdb",
+            "PACKAGE_SHA256: a8cd6d602e1203257e1241df0b5dfdb9d867334b46dc406d8cdaa8e6d2b3019c",
             workflow,
         )
         self.assertIn(
@@ -101,7 +101,7 @@ class AudioObservationSourceTests(unittest.TestCase):
             workflow,
         )
         self.assertNotIn("api.nuget.org/v3-flatcontainer", workflow)
-        self.assertIn("ordinary-settlement execute", workflow)
+        self.assertIn("ordinary-settlement execute-main", workflow)
         for name in (
             "V2_ORDINARY_APP_ID", "V2_ORDINARY_APP_PRIVATE_KEY",
             "V2_ORDINARY_AUTHORIZER_PRIVATE_KEY",
@@ -130,9 +130,9 @@ class AudioObservationSourceTests(unittest.TestCase):
             },
             policy["selectedSource"],
         )
-        self.assertEqual("7e1ac5f4689cbc8cd9b6db93b5ed7898c0c68319",
+        self.assertEqual("8eef1ab7f205132553632e03dc650e7ecdd03679",
                          policy["sourceImplementation"]["commit"])
-        self.assertEqual("audio-local-protected-policy-authority",
+        self.assertEqual("audio-local-protected-policy-authority; main-storage extension with local profile preserved",
                          policy["sourceImplementation"]["adaptation"])
         self.assertEqual("installed", policy["status"])
         self.assertTrue(policy["credentialJob"]["installed"])
@@ -151,13 +151,13 @@ class AudioObservationSourceTests(unittest.TestCase):
             set(observation["secretNames"]),
         )
         self.assertEqual("published-served-verified", policy["packagePin"]["status"])
-        self.assertEqual("0.1.3", policy["packagePin"]["version"])
+        self.assertEqual("0.3.0", policy["packagePin"]["version"])
         self.assertEqual(
-            "c505159023f0740c885696ebe24f8e066e197d9cf09cc3e64050d4210bcd0cdb",
+            "a8cd6d602e1203257e1241df0b5dfdb9d867334b46dc406d8cdaa8e6d2b3019c",
             policy["packagePin"]["sha256"],
         )
-        self.assertEqual(36407941780, policy["packagePin"]["publishRunId"])
-        self.assertEqual("FS.GG.Coordination.Cli.0.1.3.nupkg",
+        self.assertEqual(37983508705, policy["packagePin"]["publishRunId"])
+        self.assertEqual("FS.GG.Coordination.Cli.0.3.0.nupkg",
                          policy["packagePin"]["assetName"])
         self.assertTrue(policy["packagePin"]["servedPackageVerified"])
         self.assertTrue(all(item["provisioned"] is True
