@@ -53,7 +53,7 @@ permissions:
 
 jobs:
   recover-skills:
-    name: Recover FS.GG.Audio.Skills from the org feed
+    name: Recover FS.GG.Audio.Skills from the org feed [org-publication-writer]
     runs-on: ubuntu-latest
     if: github.repository == 'FS-GG/FS.GG.Audio' && github.event_name == 'workflow_dispatch' && inputs.skills_version != ''
     permissions:
@@ -62,6 +62,11 @@ jobs:
       packages: read
       id-token: write
     steps:
+      - name: Acquire org publication writer lock
+        uses: FS-GG/.github/.github/actions/publication-writer-lock@c799a9f9b21d52eb9766cf0950722e3e55145d39 # ADR-0097
+        with:
+          max-wait-minutes: 30
+        timeout-minutes: 32
       - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v6
         with:
@@ -223,7 +228,7 @@ jobs:
       - uses: ./.github/actions/headless-test
 
   publish:
-    name: Publish packages (org feed + nuget.org) + schema/apps assets
+    name: Publish packages (org feed + nuget.org) + schema/apps assets [org-publication-writer]
     runs-on: ubuntu-latest
     if: github.repository == 'FS-GG/FS.GG.Audio' && (github.event_name != 'workflow_dispatch' || inputs.skills_version == '')
     needs: [verify]
@@ -233,6 +238,11 @@ jobs:
       packages: write      # push to the org GitHub Packages feed
       id-token: write      # ADR-0013: mint the GitHub OIDC token for nuget.org Trusted Publishing
     steps:
+      - name: Acquire org publication writer lock
+        uses: FS-GG/.github/.github/actions/publication-writer-lock@c799a9f9b21d52eb9766cf0950722e3e55145d39 # ADR-0097
+        with:
+          max-wait-minutes: 30
+        timeout-minutes: 32
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.version != '' && format('refs/tags/v{0}', inputs.version) || github.ref }}
