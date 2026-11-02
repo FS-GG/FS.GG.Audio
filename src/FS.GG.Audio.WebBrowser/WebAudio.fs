@@ -270,13 +270,15 @@ type WebAudioHostObservation =
     }
 
 module private WebAudioDom =
-    [<Emit("({ctx:null,buffers:new Map(),voices:new Map(),music:null,buses:null,master:null,lastPan:0})")>]
+    // Retirement is recorded before close(): Firefox can reject pending operations
+    // before its state getter reports closed. The close promise itself must still report failures.
+    [<Emit("(function(){const g={ctx:null,retired:new WeakSet(),buffers:new Map(),voices:new Map(),music:null,buses:null,master:null,lastPan:0};g.observeOperation=(c,p,fail,cancelOnRetirement=true)=>{Promise.resolve(p).catch(e=>{if(cancelOnRetirement&&g.ctx!==c&&g.retired.has(c)&&e?.name==='InvalidStateError')return;if(fail&&g.ctx===c)fail(String(e?.message||e));else queueMicrotask(()=>{throw e;});});};return g;})()")>]
     let createGraph () : obj = jsNative
 
-    [<Emit("(function(g,ok,fail){try{if(!g.ctx){const C=globalThis.AudioContext||globalThis.webkitAudioContext;if(!C)throw new Error('Web Audio unavailable');g.ctx=new C();g.master=g.ctx.createGain();g.master.connect(g.ctx.destination);g.buses=new Map();for(const n of ['Music','Sfx','Ui','Ambient']){const x=g.ctx.createGain();x.connect(g.master);g.buses.set(n,x);}g.buses.set('Master',g.master);}const pending=g.ctx.resume();ok();Promise.resolve(pending).catch(e=>fail(String(e?.message||e)));}catch(e){fail(String(e?.message||e));}})($0,$1,$2)")>]
+    [<Emit("(function(g,ok,fail){try{if(!g.ctx){const C=globalThis.AudioContext||globalThis.webkitAudioContext;if(!C)throw new Error('Web Audio unavailable');g.ctx=new C();g.master=g.ctx.createGain();g.master.connect(g.ctx.destination);g.buses=new Map();for(const n of ['Music','Sfx','Ui','Ambient']){const x=g.ctx.createGain();x.connect(g.master);g.buses.set(n,x);}g.buses.set('Master',g.master);}const c=g.ctx,pending=c.resume();ok();g.observeOperation(c,pending,fail);}catch(e){fail(String(e?.message||e));}})($0,$1,$2)")>]
     let unlock (_graph: obj) (_ok: unit -> unit) (_fail: string -> unit) : unit = jsNative
 
-    [<Emit("(function(g,key,url,ok,fail){fetch(url).then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.arrayBuffer();}).then(b=>g.ctx.decodeAudioData(b)).then(b=>{g.buffers.set(key,b);ok();}).catch(e=>fail(String(e?.message||e)));})($0,$1,$2,$3,$4)")>]
+    [<Emit("(function(g,key,url,ok,fail){const c=g.ctx;fetch(url).then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.arrayBuffer();}).then(b=>c.decodeAudioData(b)).then(b=>{if(g.ctx===c){g.buffers.set(key,b);ok();}}).catch(e=>{if(g.ctx===c)fail(String(e?.message||e));});})($0,$1,$2,$3,$4)")>]
     let load (_graph: obj) (_key: string) (_url: string) (_ok: unit -> unit) (_fail: string -> unit) : unit = jsNative
 
     [<Emit("(function(g,id,key,bus,gain,pan,ended){const src=g.ctx.createBufferSource(),vol=g.ctx.createGain(),p=g.ctx.createStereoPanner();src.buffer=g.buffers.get(key);vol.gain.value=gain;p.pan.value=pan;g.lastPan=pan;src.connect(vol);vol.connect(p);p.connect(g.buses.get(bus));src.onended=()=>{try{src.disconnect();vol.disconnect();p.disconnect();}finally{g.voices.delete(String(id));ended();}};g.voices.set(String(id),src);src.start();})($0,$1,$2,$3,$4,$5,$6)")>]
@@ -306,16 +308,16 @@ module private WebAudioDom =
     [<Emit("(function(g,bus,amount,ms){const x=g.buses.get(bus);if(!x)return;const now=g.ctx.currentTime,v=x.gain.value,half=Math.max(0,ms)/2000;x.gain.cancelScheduledValues(now);x.gain.setValueAtTime(v,now);x.gain.linearRampToValueAtTime(v*(1-amount),now+half);x.gain.linearRampToValueAtTime(v,now+half*2);})($0,$1,$2,$3)")>]
     let duck (_graph: obj) (_bus: string) (_amount: float) (_milliseconds: float) : unit = jsNative
 
-    [<Emit("$0.ctx?.suspend()")>]
+    [<Emit("(function(g){const c=g.ctx;if(c)g.observeOperation(c,c.suspend());})($0)")>]
     let suspend (_graph: obj) : unit = jsNative
 
-    [<Emit("$0.ctx?.resume()")>]
+    [<Emit("(function(g){const c=g.ctx;if(c)g.observeOperation(c,c.resume());})($0)")>]
     let resume (_graph: obj) : unit = jsNative
 
     [<Emit("(function(g){for(const x of g.voices.values())try{x.stop();}catch{}g.voices.clear();if(g.music)try{g.music.stop();}catch{}g.music=null;})($0)")>]
     let stopAll (_graph: obj) : unit = jsNative
 
-    [<Emit("(function(g){const c=g.ctx;g.ctx=null;g.buses=null;g.master=null;return c?.close();})($0)")>]
+    [<Emit("(function(g){const c=g.ctx;if(c)g.retired.add(c);g.ctx=null;g.buses=null;g.master=null;g.buffers.clear();if(c)g.observeOperation(c,c.close(),null,false);})($0)")>]
     let close (_graph: obj) : unit = jsNative
 
     [<Emit("$0.ctx != null")>]
@@ -342,6 +344,10 @@ type WebAudioHost(config: WebAudioConfig, onEvent: WebAudioHostEvent -> unit) =
     let urls = System.Collections.Generic.Dictionary<string, string>()
     let mutable state = WebAudioPolicy.initialize config
 
+    let whenActive completion =
+        if state.Status <> WebAudioStatus.Disposed then
+            completion ()
+
     let busKey =
         function
         | Bus.Master -> "Master"
@@ -364,8 +370,10 @@ type WebAudioHost(config: WebAudioConfig, onEvent: WebAudioHostEvent -> unit) =
         for effect in effects do
             match effect with
             | WebAudioPolicyEffect.CreateOrResumeContext ->
-                WebAudioDom.unlock graph (fun () -> apply WebAudioObservation.UnlockSucceeded |> ignore) (fun error ->
-                    apply (WebAudioObservation.UnlockFailed error) |> ignore)
+                WebAudioDom.unlock
+                    graph
+                    (fun () -> whenActive (fun () -> apply WebAudioObservation.UnlockSucceeded |> ignore))
+                    (fun error -> whenActive (fun () -> apply (WebAudioObservation.UnlockFailed error) |> ignore))
             | WebAudioPolicyEffect.DecodeAsset key ->
                 match urls.TryGetValue key with
                 | true, url ->
@@ -374,15 +382,17 @@ type WebAudioHost(config: WebAudioConfig, onEvent: WebAudioHostEvent -> unit) =
                         key
                         url
                         (fun () ->
-                            apply (WebAudioObservation.AssetReady key) |> ignore
-                            onEvent (WebAudioHostEvent.AssetReady key))
+                            whenActive (fun () ->
+                                apply (WebAudioObservation.AssetReady key) |> ignore
+                                onEvent (WebAudioHostEvent.AssetReady key)))
                         (fun error ->
-                            apply (WebAudioObservation.AssetFailed(key, error)) |> ignore
-                            onEvent (WebAudioHostEvent.AssetFailed(key, error)))
+                            whenActive (fun () ->
+                                apply (WebAudioObservation.AssetFailed(key, error)) |> ignore
+                                onEvent (WebAudioHostEvent.AssetFailed(key, error))))
                 | _ -> apply (WebAudioObservation.AssetFailed(key, "asset URL unavailable")) |> ignore
             | WebAudioPolicyEffect.PlayOneShot(id, key, bus, gain, pan) ->
                 WebAudioDom.playOneShot graph id key (busKey bus) gain pan (fun () ->
-                    apply (WebAudioObservation.VoiceEnded id) |> ignore)
+                    whenActive (fun () -> apply (WebAudioObservation.VoiceEnded id) |> ignore))
             | WebAudioPolicyEffect.StopVoice id -> WebAudioDom.stopVoice graph id
             | WebAudioPolicyEffect.StartMusic(key, loop) -> WebAudioDom.startMusic graph key loop
             | WebAudioPolicyEffect.StopMusic -> WebAudioDom.stopMusic graph
