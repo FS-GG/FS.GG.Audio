@@ -32,7 +32,7 @@ const prepareUnlockedHost = async target => {
 
 // Keep a real AudioContext, but hold its operation's returned promise until after
 // disposal. This controls the browser completion clock instead of relying on a race.
-const disposalControls = async () => {
+const disposalControls = async wave => {
   const results = [];
   for (const operation of ["resume", "suspend", "close", "unlock"]) {
     const errorCount = errors.length;
@@ -72,6 +72,26 @@ const disposalControls = async () => {
     if (errors.length !== errorCount) throw new Error(`${operation}/dispose rejected without an owner: ${errors.slice(errorCount).join("\n")}`);
     results.push(result);
   }
+  await prepareUnlockedHost(page);
+  await page.evaluate(url => window.webAudio.loadSound("voice-control", url), wave);
+  await page.waitForFunction(() => window.webAudio.observe().ready === 1);
+  const ended = await page.evaluate(() => {
+    const prototype = (globalThis.AudioContext || globalThis.webkitAudioContext).prototype;
+    const original = prototype.createBufferSource;
+    let source;
+    prototype.createBufferSource = function (...args) { source = original.apply(this, args); return source; };
+    try {
+      window.webAudio.play("voice-control");
+      const completion = source?.onended;
+      if (typeof completion !== "function") throw new Error("voice completion control was not reached");
+      window.webAudio.dispose();
+      completion();
+      const after = window.webAudio.observe();
+      if (!after.disposed || after.events.includes("refused:disposed")) throw new Error(`late voice completion changed disposed ownership: ${JSON.stringify(after)}`);
+      return { operation: "voice-ended", disposed: after.disposed, nativeState: source.context.state };
+    } finally { prototype.createBufferSource = original; }
+  });
+  results.push(ended);
   return results;
 };
 
@@ -151,7 +171,7 @@ try {
   const failed = await page.evaluate(() => window.webAudio.observe());
   const disposed = await page.evaluate(() => window.webAudio.dispose());
   if (!disposed.disposed || disposed.context || disposed.graphVoices !== 0 || disposed.graphMusic) throw new Error(`disposal failed: ${JSON.stringify(disposed)}`);
-  const disposalRaces = await disposalControls();
+  const disposalRaces = await disposalControls(wave);
   const unexpectedFailures = await unexpectedFailureControls();
   evidence={result:"pass",family,mounted,locked,unlocked,loaded,positional,bounded,mixed,music,paused,resumed,failed,disposed,disposalRaces,unexpectedFailures,listening:{status:"disclosed-manual-fixture",automatedAudibilityClaim:false},runnerAudioState:unlocked.contextState};
 } finally { await browser.close(); await new Promise(done => server.close(done)); }
