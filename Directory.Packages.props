@@ -7,13 +7,12 @@
     <FsGgAudioVersion>0.6.0</FsGgAudioVersion>
   </PropertyGroup>
   <ItemGroup>
-    <!-- FSharp.Core: the org common pin (Rendering/SDD/Governance all pin 10.1.301). FS.GG.Audio.Core
-         depends on FSharp.Core ALONE (FR-006). -->
+    <!-- FS.GG.Audio.Core depends on FSharp.Core ALONE (FR-006). -->
     <!-- The coordination kit as a versioned package (ADR-0062, .github#1262). Referenced by
          .config/kit/FS.GG.Kit.receiver.proj, which materializes the kit onto disk; Renovate bumps
          this pin and kit-materialize.yml refreshes the committed kit on that PR. -->
     <PackageVersion Include="FS.GG.Kit" Version="0.94.0" />
-    <PackageVersion Include="FSharp.Core" Version="10.1.401" />
+    <PackageVersion Include="FSharp.Core" Version="10.1.403" />
     <PackageVersion Include="Fable.Package.SDK" Version="1.4.1" />
     <PackageVersion Include="Fable.Browser.Dom" Version="2.20.0" />
     <PackageVersion Include="FS.GG.Audio.Core" Version="$(FsGgAudioVersion)" />
@@ -31,28 +30,18 @@
     <!-- Test-only. FsCheck 3.x to match the ported suite's API (Config.QuickThrowOnFailure.WithMaxTest
          / Check.One) — the same line the donor Canvas.Tests used.
 
-         EXPECTO AND THE ADAPTER MOVE AS A PAIR, and the pair is the whole story. The adapter's
-         published order is 0.15.5, 0.15.6, 0.16.0, 1.0.0, and its Expecto constraint does NOT rise
-         with the number:
+         Keep the Expecto/adapter constraint compatible. Adapter 0.16.1 depends on Expecto 10.2.3
+         without an upper bound and admits Expecto 11; its VSTestBridge keeps the dotnet test entry
+         point and summary format that the headless action's fail-closed skip assertion parses.
 
-           YoloDev.Expecto.TestSdk 0.15.6 -> Expecto [10.2.2, 11.0.0)   caps below 11
-           YoloDev.Expecto.TestSdk 0.16.0 -> Expecto 10.2.3             NO upper bound  <- here
-           YoloDev.Expecto.TestSdk 1.0.0  -> Expecto [9.0.0,  10.0.0)   caps below 10
-
-         So the LATEST adapter is a trap: 1.0.0 is a higher number on an older lineage, and taking it
-         would drag Expecto back to 9.x. The one that admits Expecto 11 is 0.16.0, in the middle —
-         which is why "check the newest" is not the same as "check". An earlier pass here concluded
-         "Expecto 11 is unusable at any adapter version" precisely by reading only 0.15.6 and 1.0.0.
-
-         0.16.0 runs on Microsoft.Testing.Platform (via VSTestBridge) rather than VSTest, so this pair
-         is a runner change and not a version bump. `dotnet test` is unaffected — the bridge keeps the
-         old entry point and the old summary format, which gate.yml's skip assertion parses.
-
-         NU1608 (Warning-As-Error) catches a mismatched pair at restore, which is why a wrong guess
-         here is loud rather than subtle. -->
-    <PackageVersion Include="Expecto" Version="11.1.0" />
-    <PackageVersion Include="FsCheck" Version="3.4.0" />
-    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
+         Select NuGet stable targets using registration metadata's listed flag as well as the
+         version syntax. The flat-container index includes unlisted releases: on 2026-11-02 the
+         higher-numbered adapter 1.0.0 was unlisted and constrained Expecto to [9.0.0, 10.0.0).
+         Registration confirms 0.16.1 is the current listed stable adapter. NU1608 remains an error
+         so an incompatible constraint cannot silently substitute another version. -->
+    <PackageVersion Include="Expecto" Version="11.1.1" />
+    <PackageVersion Include="FsCheck" Version="3.6.0" />
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.11.0" />
     <PackageVersion Include="YoloDev.Expecto.TestSdk" Version="0.16.1" />
   </ItemGroup>
 </Project>
