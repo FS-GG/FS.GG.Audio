@@ -23,6 +23,11 @@ const browser = await browserType.launch(launchOptions);
 const page = await browser.newPage();
 const errors = [];
 page.on("pageerror", error => errors.push(error.stack || error.message));
+await page.addInitScript(() => {
+  window.lifecycleControlErrors = [];
+  addEventListener("error", event => window.lifecycleControlErrors.push(event.message));
+  addEventListener("unhandledrejection", event => window.lifecycleControlErrors.push(String(event.reason)));
+});
 
 const prepareUnlockedHost = async target => {
   await target.evaluate(() => window.webAudio.mount());
@@ -34,8 +39,10 @@ const prepareUnlockedHost = async target => {
 // disposal. This controls the browser completion clock instead of relying on a race.
 const disposalControls = async wave => {
   const results = [];
-  for (const operation of ["resume", "suspend", "close", "unlock"]) {
-    const errorCount = errors.length;
+  for (const { operation, delayedState = false } of [
+    { operation: "resume" }, { operation: "suspend" }, { operation: "unlock" },
+    { operation: "resume", delayedState: true }
+  ]) {
     if (operation === "unlock") await page.evaluate(() => window.webAudio.mount());
     else await prepareUnlockedHost(page);
     if (operation === "resume") {
@@ -46,7 +53,7 @@ const disposalControls = async wave => {
       const prototype = (globalThis.AudioContext || globalThis.webkitAudioContext).prototype;
       const method = operation === "unlock" ? "resume" : operation;
       const original = prototype[method];
-      const control = { reject: null, context: null, restore: () => { prototype[method] = original; } };
+      const control = { reject: null, context: null, errorCount: window.lifecycleControlErrors.length, restore: () => { prototype[method] = original; } };
       prototype[method] = function (...args) {
         control.context = this;
         Promise.resolve(original.apply(this, args)).catch(() => {});
@@ -55,21 +62,32 @@ const disposalControls = async wave => {
       window.disposalControl = control;
     }, operation);
     if (operation === "unlock") await page.click("#unlock");
-    else if (operation !== "close") await page.evaluate(operation => window.webAudio[operation === "suspend" ? "pause" : "resume"](), operation);
-    const result = await page.evaluate(async operation => {
+    else await page.evaluate(operation => window.webAudio[operation === "suspend" ? "pause" : "resume"](), operation);
+    const result = await page.evaluate(async ({ operation, delayedState }) => {
       const disposed = window.webAudio.dispose();
       const control = window.disposalControl;
       control.restore();
       if (!control.reject) throw new Error(`${operation} promise control was not reached`);
-      control.reject(new DOMException(`controlled ${operation} closed before completion`, "InvalidStateError"));
-      await new Promise(resolve => setTimeout(resolve, 0));
+      const descriptor = Object.getOwnPropertyDescriptor(control.context, "state");
+      // Firefox may deliver the rejection before the observable state changes.
+      if (delayedState) Object.defineProperty(control.context, "state", { configurable: true, get: () => "suspended" });
+      try {
+        control.reject(new DOMException(`controlled ${operation} closed before completion`, "InvalidStateError"));
+        await new Promise(resolve => setTimeout(resolve, 0));
+        const unexpected = window.lifecycleControlErrors.slice(control.errorCount);
+        if (unexpected.length) throw new Error(`${operation}${delayedState ? "-closing-state" : ""}/dispose rejected without an owner: ${unexpected.join("\n")}`);
+      } finally {
+        if (delayedState) {
+          if (descriptor) Object.defineProperty(control.context, "state", descriptor);
+          else delete control.context.state;
+        }
+      }
       const after = window.webAudio.observe();
       if (!after.disposed || after.events.filter(value => value === "disposed").length !== 1 || after.events.includes("refused:disposed")) {
         throw new Error(`late ${operation} completion changed disposed ownership: ${JSON.stringify(after)}`);
       }
-      return { operation, disposed: disposed.disposed, nativeState: control.context.state };
-    }, operation);
-    if (errors.length !== errorCount) throw new Error(`${operation}/dispose rejected without an owner: ${errors.slice(errorCount).join("\n")}`);
+      return { operation: delayedState ? "resume-closing-state" : operation, disposed: disposed.disposed, nativeState: control.context.state };
+    }, { operation, delayedState });
     results.push(result);
   }
   await prepareUnlockedHost(page);
@@ -99,7 +117,11 @@ const disposalControls = async wave => {
 // dedicated pages expect one named fault; the main journey's pageerror gate stays intact.
 const unexpectedFailureControls = async () => {
   const results = [];
-  for (const operation of ["resume", "close"]) {
+  for (const { operation, errorKind } of [
+    { operation: "resume", errorKind: "InvalidStateError" },
+    { operation: "close", errorKind: "Error" },
+    { operation: "close", errorKind: "InvalidStateError" }
+  ]) {
     const target = await browser.newPage();
     const observed = [];
     target.on("pageerror", error => observed.push(error.message));
@@ -110,22 +132,22 @@ const unexpectedFailureControls = async () => {
         await target.evaluate(() => window.webAudio.pause());
         await target.waitForFunction(() => window.webAudio.observe().contextState === "suspended");
       }
-      const fault = `unexpected-${operation}-control`;
+      const fault = `unexpected-${operation}-${errorKind}-control`;
       const reported = target.waitForEvent("pageerror");
-      await target.evaluate(({ operation, fault }) => {
+      await target.evaluate(({ operation, fault, errorKind }) => {
         const prototype = (globalThis.AudioContext || globalThis.webkitAudioContext).prototype;
         const original = prototype[operation];
         prototype[operation] = function (...args) {
           Promise.resolve(original.apply(this, args)).catch(() => {});
-          return Promise.reject(operation === "resume" ? new DOMException(fault, "InvalidStateError") : new Error(fault));
+          return Promise.reject(errorKind === "InvalidStateError" ? new DOMException(fault, errorKind) : new Error(fault));
         };
         try { window.webAudio[operation === "close" ? "dispose" : "resume"](); }
         finally { prototype[operation] = original; }
-      }, { operation, fault });
+      }, { operation, fault, errorKind });
       const failure = await reported;
       if (!failure.message.includes(fault) || observed.length !== 1) throw new Error(`unexpected ${operation} failure was masked or duplicated: ${JSON.stringify(observed)}`);
       await target.evaluate(() => window.webAudio.dispose());
-      results.push({ operation, faultObserved: true });
+      results.push({ operation, errorKind, faultObserved: true });
     } finally { await target.close(); }
   }
   return results;

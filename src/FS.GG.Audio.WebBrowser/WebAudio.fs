@@ -270,9 +270,9 @@ type WebAudioHostObservation =
     }
 
 module private WebAudioDom =
-    // close() can reject pending context operations after Dispose retires their owner.
-    // Consume only that closed-context InvalidStateError; unexpected failures stay observable.
-    [<Emit("(function(){const g={ctx:null,buffers:new Map(),voices:new Map(),music:null,buses:null,master:null,lastPan:0};g.observeOperation=(c,p,fail)=>{Promise.resolve(p).catch(e=>{if(g.ctx!==c&&c.state==='closed'&&e?.name==='InvalidStateError')return;if(fail&&g.ctx===c)fail(String(e?.message||e));else queueMicrotask(()=>{throw e;});});};return g;})()")>]
+    // Retirement is recorded before close(): Firefox can reject pending operations
+    // before its state getter reports closed. The close promise itself must still report failures.
+    [<Emit("(function(){const g={ctx:null,retired:new WeakSet(),buffers:new Map(),voices:new Map(),music:null,buses:null,master:null,lastPan:0};g.observeOperation=(c,p,fail,cancelOnRetirement=true)=>{Promise.resolve(p).catch(e=>{if(cancelOnRetirement&&g.ctx!==c&&g.retired.has(c)&&e?.name==='InvalidStateError')return;if(fail&&g.ctx===c)fail(String(e?.message||e));else queueMicrotask(()=>{throw e;});});};return g;})()")>]
     let createGraph () : obj = jsNative
 
     [<Emit("(function(g,ok,fail){try{if(!g.ctx){const C=globalThis.AudioContext||globalThis.webkitAudioContext;if(!C)throw new Error('Web Audio unavailable');g.ctx=new C();g.master=g.ctx.createGain();g.master.connect(g.ctx.destination);g.buses=new Map();for(const n of ['Music','Sfx','Ui','Ambient']){const x=g.ctx.createGain();x.connect(g.master);g.buses.set(n,x);}g.buses.set('Master',g.master);}const c=g.ctx,pending=c.resume();ok();g.observeOperation(c,pending,fail);}catch(e){fail(String(e?.message||e));}})($0,$1,$2)")>]
@@ -317,7 +317,7 @@ module private WebAudioDom =
     [<Emit("(function(g){for(const x of g.voices.values())try{x.stop();}catch{}g.voices.clear();if(g.music)try{g.music.stop();}catch{}g.music=null;})($0)")>]
     let stopAll (_graph: obj) : unit = jsNative
 
-    [<Emit("(function(g){const c=g.ctx;g.ctx=null;g.buses=null;g.master=null;g.buffers.clear();if(c)g.observeOperation(c,c.close());})($0)")>]
+    [<Emit("(function(g){const c=g.ctx;if(c)g.retired.add(c);g.ctx=null;g.buses=null;g.master=null;g.buffers.clear();if(c)g.observeOperation(c,c.close(),null,false);})($0)")>]
     let close (_graph: obj) : unit = jsNative
 
     [<Emit("$0.ctx != null")>]
