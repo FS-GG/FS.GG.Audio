@@ -97,7 +97,7 @@ const unexpectedFailureControls = async () => {
         const original = prototype[operation];
         prototype[operation] = function (...args) {
           Promise.resolve(original.apply(this, args)).catch(() => {});
-          return Promise.reject(new Error(fault));
+          return Promise.reject(operation === "resume" ? new DOMException(fault, "InvalidStateError") : new Error(fault));
         };
         try { window.webAudio[operation === "close" ? "dispose" : "resume"](); }
         finally { prototype[operation] = original; }
