@@ -44,7 +44,7 @@ jobs:
           echo "sha256=$digest" >> "$GITHUB_OUTPUT"
           echo "activation=$activation" >> "$GITHUB_OUTPUT"
       - name: Retain public exact-run receipt
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ordinary-v2-preflight-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/ordinary-v2-preflight.json
@@ -76,7 +76,7 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
       - name: Download only this run's predecessor receipt
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: ordinary-v2-preflight-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/ordinary-v2-receipt
@@ -93,7 +93,7 @@ jobs:
           test "$(sha256sum "$receipt" | cut -d ' ' -f 1)" = "$EXPECTED_RECEIPT_SHA256"
           python3 tools/v2-ci-ordinary-observe.py verify-main "$receipt"
       - name: Set up the pinned .NET SDK
-        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           global-json-file: global.json
       - name: Install only the pinned public Coordination CLI archive
