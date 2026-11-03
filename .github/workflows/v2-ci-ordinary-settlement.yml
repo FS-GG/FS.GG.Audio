@@ -93,7 +93,7 @@ jobs:
           test "$(sha256sum "$receipt" | cut -d ' ' -f 1)" = "$EXPECTED_RECEIPT_SHA256"
           python3 tools/v2-ci-ordinary-observe.py verify-main "$receipt"
       - name: Set up the pinned .NET SDK
-        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           global-json-file: global.json
       - name: Install only the pinned public Coordination CLI archive
